@@ -38,7 +38,8 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p output
-          cp app/build/outputs/apk/release/*.apk "output/ТестоГен-${{ github.ref_name }}.apk"
+          # GitHub вырезает кириллицу из имён файлов релиза, поэтому латиницей
+          cp app/build/outputs/apk/release/*.apk "output/Testogen-${{ github.ref_name }}.apk"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
