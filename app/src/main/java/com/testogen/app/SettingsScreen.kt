@@ -101,7 +101,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenAiInstructions: () -> Unit,
     onOpenAiLog: () -> Unit,
-    onOpenTextbooks: () -> Unit,
     onSignOut: () -> Unit
 ) {
     val context = LocalContext.current
@@ -611,36 +610,6 @@ fun SettingsScreen(
                 ) {
                     Text(
                         text = "Посмотреть последние запросы",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            SettingsCard {
-                SectionLabel("Учебники")
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Загрузите учебники с параграфами § — и генерируйте вопросы по выбранным параграфам.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onOpenTextbooks,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(
-                        text = "Мои учебники",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )

@@ -22,9 +22,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +50,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
@@ -252,7 +255,8 @@ fun AppNavigation() {
                 onAddQuestion = { topic ->
                     navController.navigate("new_question?defaultTopic=" + Uri.encode(topic))
                 },
-                onEditQuestion = { id -> navController.navigate("new_question?questionId=$id") }
+                onEditQuestion = { id -> navController.navigate("new_question?questionId=$id") },
+                onOpenTextbookRange = { id -> navController.navigate("textbook_range/$id") }
             )
         }
         composable("draft") {
@@ -277,7 +281,6 @@ fun AppNavigation() {
                 onBack = { navController.popBackStack() },
                 onOpenAiInstructions = { navController.navigate("ai_instructions_editor") },
                 onOpenAiLog = { navController.navigate("ai_log") },
-                onOpenTextbooks = { navController.navigate("textbooks") },
                 onSignOut = {
                     navScope.launch {
                         AuthManager.signOut()
@@ -1746,11 +1749,13 @@ private fun OptionField(label: String, value: String, onValueChange: (String) ->
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionBankScreen(
     onBack: () -> Unit,
     onAddQuestion: (String) -> Unit,
-    onEditQuestion: (Long) -> Unit
+    onEditQuestion: (Long) -> Unit,
+    onOpenTextbookRange: (String) -> Unit
 ) {
     val context = LocalContext.current
     val db = (context.applicationContext as TestoGenApp).database
@@ -1771,144 +1776,49 @@ fun QuestionBankScreen(
     var genIsError by remember { mutableStateOf(false) }
     var internetTopicTouched by remember { mutableStateOf(false) }
 
-    var pdfFileName by remember { mutableStateOf<String?>(null) }
-    var pdfPageCount by remember { mutableIntStateOf(0) }
-    var pdfText by remember { mutableStateOf<String?>(null) }
-    var pdfExtracting by remember { mutableStateOf(false) }
-    var pdfError by remember { mutableStateOf<String?>(null) }
-    var pdfTopic by remember { mutableStateOf("") }
-    var fileTopicTouched by remember { mutableStateOf(false) }
-
     LaunchedEffect(activeTab) {
-        when (activeTab) {
-            "internet" -> if (!internetTopicTouched && genTopic.isBlank()) genTopic = AppState.mainTopic
-            "file" -> if (!fileTopicTouched && pdfTopic.isBlank()) pdfTopic = AppState.mainTopic
+        if (activeTab == "internet" && !internetTopicTouched && genTopic.isBlank()) {
+            genTopic = AppState.mainTopic
         }
     }
 
     var topicFilter by remember { mutableStateOf<String?>(null) }
-    var pdfGenerating by remember { mutableStateOf(false) }
-    var pdfResult by remember { mutableStateOf<String?>(null) }
-    var pdfIsError by remember { mutableStateOf(false) }
 
-    val runPdfGeneration: () -> Unit = {
-        val s = settings
-        when {
-            pdfFileName == null || pdfText.isNullOrBlank() ->
-                Toast.makeText(context, "Сначала выберите PDF-файл", Toast.LENGTH_SHORT).show()
-            pdfTopic.isBlank() ->
-                Toast.makeText(context, "Укажите тему/класс", Toast.LENGTH_SHORT).show()
-            genDifficulties.isEmpty() ->
-                Toast.makeText(context, "Выберите хотя бы одну сложность", Toast.LENGTH_SHORT).show()
-            s == null || s.apiKey.isBlank() ->
-                Toast.makeText(context, "Сначала добавьте ключ OpenRouter в Настройках", Toast.LENGTH_SHORT).show()
-            else -> {
-                pdfGenerating = true
-                pdfResult = null
-                scope.launch {
-                    val textbookText = PdfQuestionGenerator.selectRelevantChunks(
-                        PdfQuestionGenerator.splitIntoChunks(pdfText ?: ""),
-                        pdfTopic
-                    )
-                    val outcome = AiQuestionGenerator.generateFromPdf(
-                        apiKey = s.apiKey,
-                        settings = s,
-                        topic = pdfTopic.trim(),
-                        count = genCount,
-                        difficulties = genDifficulties,
-                        textbookText = textbookText
-                    )
-                    pdfGenerating = false
-                    if (outcome.questions.isNotEmpty()) {
-                        val now = System.currentTimeMillis()
-                        val candidates = outcome.questions.mapIndexed { index, q ->
-                            Question(
-                                text = q.text.trim(),
-                                optionA = q.options.getOrElse(0) { "" }.trim(),
-                                optionB = q.options.getOrElse(1) { "" }.trim(),
-                                optionC = q.options.getOrElse(2) { "" }.trim(),
-                                optionD = q.options.getOrElse(3) { "" }.trim(),
-                                correctIndex = q.correct,
-                                difficulty = q.difficulty,
-                                tricky = false,
-                                createdAt = now - index,
-                                source = "pdf",
-                                topic = pdfTopic.trim()
-                            )
-                        }
-                        val (fresh, dups) = db.questionDao().insertUnique(candidates)
-                        outcome.modelUsed?.let { settingsRepo.saveLastWorking(it) }
-                        activeTab = "manual"
-                        Toast.makeText(
-                            context,
-                            when {
-                                fresh == 0 -> "Все сгенерированные вопросы уже есть в банке"
-                                dups > 0 -> "Добавлено $fresh вопросов (отброшено $dups дублей)"
-                                else -> "Добавлено $fresh вопросов"
-                            },
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        pdfIsError = true
-                        pdfResult = outcome.report.ifBlank { "Не удалось сгенерировать вопросы" }
-                    }
-                }
-            }
-        }
-    }
+    // Шаг 28: «Файл» = «Мои учебники» (Supabase + локальный кэш Room).
+    val textbooks by db.textbookDao().getAll().collectAsState(initial = emptyList())
+    var textbookUploading by remember { mutableStateOf(false) }
+    var textbookOversizeMb by remember { mutableStateOf<Int?>(null) }
+    var textbookPendingDelete by remember { mutableStateOf<Textbook?>(null) }
+    val textbookDateFormat = remember { SimpleDateFormat("d MMM yy", Locale("ru")) }
 
-    val pdfPicker = rememberLauncherForActivityResult(
+    val textbookPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            pdfExtracting = true
-            pdfError = null
-            pdfFileName = null
-            pdfText = null
-            pdfPageCount = 0
+        if (uri != null && !textbookUploading) {
+            textbookUploading = true
             scope.launch {
-                val outcome: PdfExtractResult? = withContext(Dispatchers.IO) {
-                    try {
-                        var displayName = "document.pdf"
-                        context.contentResolver.query(
-                            uri,
-                            arrayOf(OpenableColumns.DISPLAY_NAME),
-                            null, null, null
-                        )?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                cursor.getString(0)?.let { displayName = it }
-                            }
+                val result = TextbookRepository.uploadTextbook(context, uri)
+                textbookUploading = false
+                result.fold(
+                    onSuccess = { book ->
+                        Toast.makeText(
+                            context,
+                            "Учебник загружен: ${book.paragraphCount} параграфов",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    onFailure = { e ->
+                        if (e is OversizeException) {
+                            textbookOversizeMb = e.mb
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Не удалось загрузить: ${e.message ?: "неизвестная ошибка"}",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
-                        context.contentResolver.openInputStream(uri)?.use { input ->
-                            val doc = PDDocument.load(input)
-                            val pages = doc.numberOfPages
-                            val text = PDFTextStripper().getText(doc)
-                            doc.close()
-                            PdfExtractResult(displayName, pages, text)
-                        }
-                    } catch (e: Exception) {
-                        null
                     }
-                }
-                pdfExtracting = false
-                if (outcome == null) {
-                    pdfFileName = null
-                    pdfError = "Не удалось открыть PDF (файл повреждён или защищён паролем)"
-                } else {
-                    val cleaned = outcome.text
-                        .replace("\r\n", "\n")
-                        .replace('\r', '\n')
-                        .replace(Regex("\n{3,}"), "\n\n")
-                        .trim()
-                    pdfFileName = outcome.name
-                    pdfPageCount = outcome.pages
-                    pdfText = cleaned
-                    pdfError = if (cleaned.isEmpty()) {
-                        "Текст не извлечён (возможно, PDF — это сканы картинок)"
-                    } else {
-                        null
-                    }
-                }
+                )
             }
         }
     }
@@ -1983,7 +1893,7 @@ fun QuestionBankScreen(
         color = MaterialTheme.colorScheme.background
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            val isFormTab = activeTab == "internet" || activeTab == "file"
+            val isFormTab = activeTab == "internet"
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2029,7 +1939,7 @@ fun QuestionBankScreen(
                     }
                 }
 
-                if (isFormTab) {
+                if (isFormTab || activeTab == "file") {
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChoiceChip(
@@ -2211,248 +2121,62 @@ fun QuestionBankScreen(
                         }
                     }
                 } else if (activeTab == "file") {
-                    OutlinedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.outlinedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        border = BorderStroke(1.dp, CardBorder)
-                    ) {
-                        Column(modifier = Modifier.padding(20.dp)) {
-                            Text(
-                                text = "Загрузка учебника (PDF)",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Button(
-                                onClick = { pdfPicker.launch(arrayOf("application/pdf")) },
-                                enabled = !pdfExtracting,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            ) {
-                                androidx.compose.foundation.Image(
-                                    painter = androidx.compose.ui.res.painterResource(
-                                        id = R.drawable.ic_upload
-                                    ),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Выбрать PDF-файл",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            if (pdfExtracting) {
-                                Spacer(modifier = Modifier.height(14.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Извлекаем текст…",
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            pdfFileName?.let { name ->
-                                Spacer(modifier = Modifier.height(14.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.fillMaxWidth()
+                    Text(
+                        text = "Учебники хранятся в облаке. Тап — выбрать диапазон параграфов, долгий тап — удалить.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (textbookUploading) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    if (textbooks.isEmpty() && !textbookUploading) {
+                        Text(
+                            text = "Пока нет учебников. Нажмите «+», чтобы загрузить первый (PDF, DOCX или TXT с параграфами §).",
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            items(textbooks) { book ->
+                                OutlinedCard(
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .combinedClickable(
+                                            onClick = {
+                                                if (!textbookUploading) {
+                                                    onOpenTextbookRange(book.id)
+                                                }
+                                            },
+                                            onLongClick = { textbookPendingDelete = book }
+                                        )
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(
-                                            start = 14.dp,
-                                            end = 4.dp,
-                                            top = 10.dp,
-                                            bottom = 10.dp
-                                        ),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = name,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 2
-                                            )
-                                            Text(
-                                                text = "Страниц: $pdfPageCount · Символов: ${pdfText?.length ?: 0}",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        IconButton(onClick = {
-                                            pdfFileName = null
-                                            pdfText = null
-                                            pdfPageCount = 0
-                                            pdfError = null
-                                        }) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Clear,
-                                                contentDescription = "Убрать файл",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text(
+                                            text = book.name,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = book.format.uppercase() + " · " +
+                                                book.paragraphCount + " параграфов · " +
+                                                textbookDateFormat.format(
+                                                    java.util.Date(book.uploadedAt)
+                                                ),
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
-                            }
-
-                            pdfError?.let { error ->
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(text = error, fontSize = 13.sp, color = Color(0xFFC62828))
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = "Тема / класс",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = pdfTopic,
-                                onValueChange = {
-                                    pdfTopic = it
-                                    fileTopicTouched = true
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                placeholder = {
-                                    Text(
-                                        text = "Например: Столетняя война, 6 класс",
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "Количество вопросов",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                StepButton(
-                                    symbol = "−",
-                                    enabled = genCount > 1,
-                                    onClick = { genCount -= 1 }
-                                )
-                                Spacer(modifier = Modifier.width(18.dp))
-                                Text(
-                                    text = genCount.toString(),
-                                    fontSize = 26.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.width(56.dp)
-                                )
-                                Spacer(modifier = Modifier.width(18.dp))
-                                StepButton(
-                                    symbol = "+",
-                                    enabled = genCount < 50,
-                                    onClick = { genCount += 1 }
-                                )
-                            }
-                            if (genCount > 30) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Генерация может занять несколько минут",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "Сложность",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(
-                                    "easy" to "Лёгкий",
-                                    "medium" to "Средний",
-                                    "hard" to "Сложный"
-                                ).forEach { (value, label) ->
-                                    ChoiceChip(
-                                        label = label,
-                                        selected = value in genDifficulties,
-                                        onClick = {
-                                            genDifficulties =
-                                                if (value in genDifficulties) {
-                                                    ArrayList(genDifficulties - value)
-                                                } else {
-                                                    ArrayList(genDifficulties + value)
-                                                }
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = runPdfGeneration,
-                                enabled = !pdfGenerating,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            ) {
-                                Text(
-                                    text = if (pdfGenerating) "Генерируем…" else "✨ Сгенерировать вопросы",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            if (pdfGenerating) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Идёт запрос к ИИ — может занять до минуты",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            pdfResult?.let { result ->
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = result,
-                                    fontSize = 12.sp,
-                                    color = if (pdfIsError) Color(0xFFC62828) else Color(0xFF0E7C6B)
-                                )
                             }
                         }
                     }
@@ -2620,18 +2344,115 @@ fun QuestionBankScreen(
                 Spacer(modifier = Modifier.height(96.dp))
             }
 
-            FloatingActionButton(
-                onClick = { onAddQuestion(AppState.mainTopic) },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Text(text = "+", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            if (activeTab == "file") {
+                FloatingActionButton(
+                    onClick = {
+                        if (!textbookUploading) {
+                            textbookPicker.launch(
+                                arrayOf(
+                                    "application/pdf",
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "text/plain"
+                                )
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(20.dp),
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    if (textbookUploading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Загрузить учебник"
+                        )
+                    }
+                }
+            } else {
+                FloatingActionButton(
+                    onClick = { onAddQuestion(AppState.mainTopic) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(20.dp),
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Text(text = "+", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
+    }
+
+    textbookOversizeMb?.let { mb ->
+        AlertDialog(
+            onDismissRequest = { textbookOversizeMb = null },
+            text = {
+                Text(
+                    text = "Файл слишком большой ($mb МБ). Максимум для загрузки — 50 МБ. " +
+                        "Попробуйте сжать PDF или использовать другую версию файла.",
+                    fontSize = 15.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { textbookOversizeMb = null }) {
+                    Text(text = "Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    textbookPendingDelete?.let { book ->
+        AlertDialog(
+            onDismissRequest = { textbookPendingDelete = null },
+            text = {
+                Text(
+                    text = "Удалить учебник «${book.name}»? Он будет удалён и из облака, и из списка.",
+                    fontSize = 15.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val toDelete = book
+                    textbookPendingDelete = null
+                    scope.launch {
+                        val result = TextbookRepository.deleteTextbook(context, toDelete)
+                        result.fold(
+                            onSuccess = {
+                                Toast.makeText(
+                                    context,
+                                    "Учебник удалён",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onFailure = { e ->
+                                Toast.makeText(
+                                    context,
+                                    "Не удалось удалить: ${e.message ?: "ошибка"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+                    }
+                }) {
+                    Text(text = "Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { textbookPendingDelete = null }) {
+                    Text(text = "Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
     }
 
     if (showClearDialog) {
