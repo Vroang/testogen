@@ -205,9 +205,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
+    val navScope = rememberCoroutineScope()
+    // Шаг 27: не авторизован — сначала экран входа.
+    val startDestination = remember { if (AuthManager.isSignedIn()) "main" else "login" }
     NavHost(
         navController = navController,
-        startDestination = "main",
+        startDestination = startDestination,
         enterTransition = {
             fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 8 }
         },
@@ -260,11 +263,29 @@ fun AppNavigation() {
                 }
             )
         }
+        composable("login") {
+            LoginScreen(
+                onSignedIn = {
+                    navController.navigate("main") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                }
+            )
+        }
         composable("settings") {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenAiInstructions = { navController.navigate("ai_instructions_editor") },
-                onOpenAiLog = { navController.navigate("ai_log") }
+                onOpenAiLog = { navController.navigate("ai_log") },
+                onOpenTextbooks = { navController.navigate("textbooks") },
+                onSignOut = {
+                    navScope.launch {
+                        AuthManager.signOut()
+                        navController.navigate("login") {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
             )
         }
         composable("ai_instructions_editor") {
@@ -272,6 +293,23 @@ fun AppNavigation() {
         }
         composable("ai_log") {
             AiLogScreen(onBack = { navController.popBackStack() })
+        }
+        composable("textbooks") {
+            TextbooksScreen(
+                onBack = { navController.popBackStack() },
+                onOpenRange = { id -> navController.navigate("textbook_range/$id") }
+            )
+        }
+        composable(
+            "textbook_range/{textbookId}",
+            arguments = listOf(
+                navArgument("textbookId") { type = NavType.StringType }
+            )
+        ) { entry ->
+            TextbookRangeScreen(
+                textbookId = entry.arguments?.getString("textbookId").orEmpty(),
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }

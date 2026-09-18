@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
@@ -33,6 +34,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,7 +100,9 @@ private fun SectionLabel(text: String) {
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenAiInstructions: () -> Unit,
-    onOpenAiLog: () -> Unit
+    onOpenAiLog: () -> Unit,
+    onOpenTextbooks: () -> Unit,
+    onSignOut: () -> Unit
 ) {
     val context = LocalContext.current
     val repo = (context.applicationContext as TestoGenApp).settingsRepository
@@ -611,6 +615,78 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            SettingsCard {
+                SectionLabel("Учебники")
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Загрузите учебники с параграфами § — и генерируйте вопросы по выбранным параграфам.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenTextbooks,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(
+                        text = "Мои учебники",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            var confirmSignOut by remember { mutableStateOf(false) }
+            TextButton(
+                onClick = { confirmSignOut = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Выйти из аккаунта",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (confirmSignOut) {
+                AlertDialog(
+                    onDismissRequest = { confirmSignOut = false },
+                    text = {
+                        Text(
+                            text = "Выйти из аккаунта? Учебники останутся в облаке.",
+                            fontSize = 15.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmSignOut = false
+                            onSignOut()
+                        }) {
+                            Text(
+                                text = "Выйти",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmSignOut = false }) {
+                            Text(text = "Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))

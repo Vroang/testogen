@@ -1,51 +1,63 @@
 # PROGRESS
 
-## Текущий шаг: 26.1 — фикс скачивания APK в автообновлении
-## Статус: собран, тег v37 отправлен, ждёт проверки пользователем
+## Текущий шаг: 27 — Supabase + библиотека учебников
+## Статус: собран, тег v38 отправлен, ждёт проверки пользователем
 
 ## Что сделано
-- ДИАГНОСТИКА: downloadAndInstall() ставил задачу в системный
-  DownloadManager (папка «Downloads», уведомление VISIBLE,
-  mimeType пакета) с приёмником ACTION_DOWNLOAD_COMPLETE.
-  Слабые места: 1) запрос БЕЗ заголовка User-Agent — GitHub
-  может отдать 403; 2) любые сбои системной загрузки были
-  НЕВИДИМЫ — статус задачи нигде не опрашивался, приёмник
-  срабатывал только на success-пути, ошибки глотались; 3) путь
-  в общий Downloads зависит от системных ограничений хранилища.
-  Разрешения в манифесте в порядке: INTERNET и
-  REQUEST_INSTALL_PACKAGES есть; WRITE_EXTERNAL_STORAGE не нужен
-  (не используется).
-- ЧАСТЬ 2 — downloadAndInstall() переписан целиком (UpdaterClient.kt):
-  - скачивание своим OkHttp в кэш приложения
-    (cacheDir/downloads/<имя APK>), корутина на Dispatchers.IO;
-  - заголовок User-Agent: TestogenUpdater/1.0;
-  - редиректы включены явно (followRedirects/followSslRedirects);
-  - диалог «Обновление … / Скачивание… N%» (по contentLength),
-    некликабельный во время загрузки;
-  - явные ошибки Toast: 403/404 → «Файл недоступен», прочие
-    HTTP → код; таймаут → «Превышено время ожидания»;
-    нет сети → «Нет соединения»; мало места → «Недостаточно
-    места на устройстве»; прочее — текст ошибки. Ничего не глотается;
-  - установка: FileProvider.getUriForFile (authority
-    com.testogen.app.fileprovider, cache-path уже покрывает кэш)
-    → Intent ACTION_VIEW с mimeType пакета,
-    FLAG_GRANT_READ_URI_PERMISSION + FLAG_ACTIVITY_NEW_TASK →
-    системный вопрос «Установить приложение?»;
-  - старые файлы в cacheDir/downloads удаляются перед загрузкой;
-  - checkLatestRelease() НЕ тронут (проверка работала).
-- app/build.gradle.kts: versionCode = 37,
-  versionName = "0.26.1-step26fix".
-- Логика приложения не тронута, новых библиотек нет
-  (OkHttp и FileProvider уже были).
+- ЧАСТЬ 1 — подключение Supabase:
+  - зависимости: BOM io.github.jan-tennert.supabase:2.6.0
+    (НЕ 3.0.0 — он собран более новым Kotlin и несовместим с нашим
+    2.0.20; проверено), postgrest-kt, storage-kt, gotrue-kt
+    (в линейке 2.x модуль авторизации называется gotrue-kt,
+    переименован в auth-kt только в 3.x), ktor-client-okhttp 2.3.12;
+    kotlinx-serialization-json оставлен 1.7.2 (спека предлагала
+    1.6.3 — у нас новее и совместимее);
+  - SupabaseClient.kt: клиент (URL проекта, anon-ключ, плагины
+    Auth/Postgrest/Storage);
+  - схема таблиц сверена с живым REST API (anon-ключ): textbooks
+    (id, user_id, name, format, paragraph_count, storage_path,
+    uploaded_at timestamptz), paragraphs (id, textbook_id, number,
+    text).
+- ЧАСТЬ 2 — авторизация:
+  - AuthManager.kt: signIn/signOut/isSignedIn/currentUser
+    (email-провайдер Supabase Auth);
+  - экран «Вход» (маршрут login): Email, пароль, кнопка «Войти»
+    (teal), ошибка — Toast;
+  - при запуске: не авторизован → «Вход», авторизован → главный
+    экран (сессия восстанавливается автоматически на Android);
+  - Настройки → «Выйти из аккаунта» с подтверждением.
+- ЧАСТЬ 3 — библиотека учебников:
+  - Room: сущность Textbook (локальный кэш метаданных), TextbookDao,
+    база 6 → 7, миграция CREATE TABLE textbooks;
+  - TextbookRepository.kt: загрузка (размер → извлечение текста →
+    разбивка по «§ N» → Storage "textbooks/{id}/{имя}" → запись в
+    textbooks → параграфы батчами по 100 → локальный кэш Room),
+    удаление (параграфы + запись + объект Storage + Room),
+    выборка параграфов диапазона (по возрастанию номеров);
+    DOCX читается из ZIP (word/document.xml), TXT — UTF-8, PDF —
+    PdfBox;
+  - лимит: файл > 50 МБ (по OpenableColumns.SIZE) → AlertDialog
+    «Файл слишком большой (X МБ)…», загрузка не запускается;
+    ошибка 413 от сервера → понятный Toast;
+  - экран «Мои учебники» (маршрут textbooks): список из Room
+    (Flow), пустое состояние, FAB «+» (выбор PDF/DOCX/TXT),
+    долгий тап → удаление с подтверждением (и из Supabase, и
+    из Room); Настройки → карточка «Учебники»;
+  - экран «Выбор диапазона» (textbook_range/{id}): «От §»/«До §»,
+    количество (1–50), мультивыбор сложностей, «Сгенерировать»:
+    параграфы диапазона → ИИ (тот же каскад, операция «pdf»,
+    попадает в «Журнал ИИ») → банк с topic «<имя> § от-до»,
+    source «pdf», с фильтром дублей.
+- app/build.gradle.kts: versionCode = 38, versionName = "0.27-step27".
+- Существующие экраны, каскад, парсер, автообновление — не тронуты.
 
 ## Известные проблемы
 —
 ## Заметки
 - Путь к локальному APK:
-  C:\Users\Ivan\Desktop\TestGenerator\apk\ТестоГен-v0.26.1-step26fix.apk
-- Версионирование: versionCode монотонно растёт (шаг 26.1 = 37).
-- Тест по чек-листу: с установленной v35 запустить v37 → появится
-  диалог «Обновление v36» (последний релиз на GitHub) → «Обновить»
-  → «Скачивание… N%» → системный установщик → после установки v36
-  приложение при следующем запуске само предложит v37.
+  C:\Users\Ivan\Desktop\TestGenerator\apk\ТестоГен-v0.27-step27.apk
+- Версионирование: versionCode монотонно растёт (шаг 27 = 38).
+- Автопубликация: тег v38 → GitHub Actions → релиз; у телефонов
+  с версией ≤ 37 приложение предложит обновление.
+- Первый вход: mama@testogen.app + пароль (знает пользователь).
 - VISION.md и PLAN.md не менялись.

@@ -8,6 +8,7 @@ import androidx.room.Delete
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
@@ -137,15 +138,43 @@ interface AiLogDao {
     suspend fun trimOlderThan(keep: Int = 200)
 }
 
+// Шаг 27: учебник из библиотеки Supabase (локальный кэш метаданных).
+@Entity(tableName = "textbooks")
+data class Textbook(
+    @PrimaryKey val id: String,
+    val name: String,
+    val format: String,
+    val paragraphCount: Int,
+    val uploadedAt: Long,
+    val storagePath: String,
+    val localCachePath: String? = null
+)
+
+@Dao
+interface TextbookDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(textbook: Textbook)
+
+    @Query("SELECT * FROM textbooks ORDER BY uploadedAt DESC")
+    fun getAll(): Flow<List<Textbook>>
+
+    @Query("SELECT * FROM textbooks WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): Textbook?
+
+    @Query("DELETE FROM textbooks WHERE id = :id")
+    suspend fun delete(id: String)
+}
+
 @Database(
-    entities = [Question::class, ReplacementReason::class, AiLogEntry::class],
-    version = 6,
+    entities = [Question::class, ReplacementReason::class, AiLogEntry::class, Textbook::class],
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun questionDao(): QuestionDao
     abstract fun replacementReasonDao(): ReplacementReasonDao
     abstract fun aiLogDao(): AiLogDao
+    abstract fun textbookDao(): TextbookDao
 
     companion object {
         // Шаг 4: добавляется таблица причин замен; банк вопросов сохраняется.
@@ -199,6 +228,21 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_log_timestamp ON ai_log(timestamp)")
             }
         }
+        // Шаг 27: таблица учебников (локальный кэш библиотеки).
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS textbooks (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "name TEXT NOT NULL, " +
+                        "format TEXT NOT NULL, " +
+                        "paragraphCount INTEGER NOT NULL, " +
+                        "uploadedAt INTEGER NOT NULL, " +
+                        "storagePath TEXT NOT NULL, " +
+                        "localCachePath TEXT)"
+                )
+            }
+        }
     }
 }
 
@@ -210,7 +254,8 @@ class TestoGenApp : Application() {
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
-                AppDatabase.MIGRATION_5_6
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7
             )
             .build()
     }

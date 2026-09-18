@@ -15,9 +15,9 @@ android {
         minSdk = 26
         targetSdk = 34
         // AGP требует versionCode >= 1; номер растёт монотонно
-        // (шаг 3.1 занял 6, поэтому шаг 26.1 = 37)
-        versionCode = 37
-        versionName = "0.26.1-step26fix"
+        // (шаг 3.1 занял 6, поэтому шаг 27 = 38)
+        versionCode = 38
+        versionName = "0.27-step27"
     }
 
     signingConfigs {
@@ -72,6 +72,14 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
+
+    // Supabase (шаг 27): BOM 2.6.0 совместим с Kotlin 2.0.20.
+    // В 2.x модуль авторизации называется gotrue-kt (в 3.x — auth-kt).
+    implementation(platform("io.github.jan-tennert.supabase:bom:2.6.0"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
+    implementation("io.github.jan-tennert.supabase:gotrue-kt")
+    implementation("io.ktor:ktor-client-okhttp:2.3.12")
 
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }
