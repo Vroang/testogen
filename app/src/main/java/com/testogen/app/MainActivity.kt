@@ -318,7 +318,9 @@ fun MainScreen(
     var topic by rememberSaveable { mutableStateOf("") }
     var variants by rememberSaveable { mutableStateOf(1) }
     var questions by rememberSaveable { mutableStateOf(10) }
-    var difficulty by rememberSaveable { mutableStateOf("Все") }
+    var selectedDifficulties by rememberSaveable {
+        mutableStateOf(arrayListOf("easy", "medium", "hard"))
+    }
     var tricky by rememberSaveable { mutableStateOf(false) }
     var showAnswers by rememberSaveable { mutableStateOf(true) }
     var pendingFiltered by remember { mutableStateOf<List<Question>?>(null) }
@@ -362,20 +364,14 @@ fun MainScreen(
     }
 
     val buildPool: (List<Question>) -> List<Question> = { all ->
-        val difficultyFilter = when (difficulty) {
-            "Лёгкие" -> "easy"
-            "Средние" -> "medium"
-            "Сложные" -> "hard"
-            else -> "all"
-        }
         val t = topic.trim()
-        val base = DraftBuilder.filterQuestions(all, difficultyFilter, tricky, t)
+        val base = DraftBuilder.filterQuestions(all, selectedDifficulties, tricky, t)
         if (t.isNotBlank() && extraTopicsList.isNotEmpty()) {
             val mainIds = base.map { it.id }.toSet()
             base + all.filter { q ->
                 !mainIds.contains(q.id) &&
                     extraTopicsList.any { q.topic.equals(it, ignoreCase = true) } &&
-                    (difficultyFilter == "all" || q.difficulty == difficultyFilter) &&
+                    q.difficulty in selectedDifficulties &&
                     (tricky || !q.tricky)
             }
         } else {
@@ -407,12 +403,6 @@ fun MainScreen(
                     Toast.LENGTH_SHORT
                 ).show()
             }
-            val difficultyFilter = when (difficulty) {
-                "Лёгкие" -> "easy"
-                "Средние" -> "medium"
-                "Сложные" -> "hard"
-                else -> "all"
-            }
             topUpTarget = toAdd
             topUpDone = 0
             topUpStopRequested = false
@@ -431,7 +421,7 @@ fun MainScreen(
                         settings = s,
                         topic = topic.ifBlank { "общая тематика теста" },
                         count = portion,
-                        difficulty = difficultyFilter,
+                        difficulties = selectedDifficulties,
                         operation = "topup"
                     )
                     if (outcome.questions.isNotEmpty()) {
@@ -444,11 +434,7 @@ fun MainScreen(
                                 optionC = q.options.getOrElse(2) { "" }.trim(),
                                 optionD = q.options.getOrElse(3) { "" }.trim(),
                                 correctIndex = q.correct,
-                                difficulty = if (difficultyFilter == "all") {
-                                    q.difficulty
-                                } else {
-                                    difficultyFilter
-                                },
+                                difficulty = q.difficulty,
                                 tricky = false,
                                 createdAt = now - index,
                                 source = "ai",
@@ -701,11 +687,22 @@ fun MainScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("Все", "Лёгкие", "Средние", "Сложные").forEach { label ->
+                            listOf(
+                                "easy" to "Лёгкие",
+                                "medium" to "Средние",
+                                "hard" to "Сложные"
+                            ).forEach { (value, label) ->
                                 ChoiceChip(
                                     label = label,
-                                    selected = difficulty == label,
-                                    onClick = { difficulty = label },
+                                    selected = value in selectedDifficulties,
+                                    onClick = {
+                                        selectedDifficulties =
+                                            if (value in selectedDifficulties) {
+                                                ArrayList(selectedDifficulties - value)
+                                            } else {
+                                                ArrayList(selectedDifficulties + value)
+                                            }
+                                    },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -742,6 +739,14 @@ fun MainScreen(
                             onClick = {
                                 scope.launch {
                                     if (topUpRunning) return@launch
+                                    if (selectedDifficulties.isEmpty()) {
+                                        Toast.makeText(
+                                            context,
+                                            "Выберите хотя бы одну сложность",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@launch
+                                    }
                                     val all = db.questionDao().getAllOnce()
                                     val filtered = buildPool(all)
                                     val needed = variants * questions
@@ -1722,7 +1727,7 @@ fun QuestionBankScreen(
     var activeTab by remember { mutableStateOf("manual") }
     var genTopic by remember { mutableStateOf("") }
     var genCount by remember { mutableIntStateOf(5) }
-    var genDifficulty by remember { mutableStateOf("medium") }
+    var genDifficulties by remember { mutableStateOf(arrayListOf("easy", "medium", "hard")) }
     var generating by remember { mutableStateOf(false) }
     var genResult by remember { mutableStateOf<String?>(null) }
     var genIsError by remember { mutableStateOf(false) }
@@ -1755,6 +1760,8 @@ fun QuestionBankScreen(
                 Toast.makeText(context, "Сначала выберите PDF-файл", Toast.LENGTH_SHORT).show()
             pdfTopic.isBlank() ->
                 Toast.makeText(context, "Укажите тему/класс", Toast.LENGTH_SHORT).show()
+            genDifficulties.isEmpty() ->
+                Toast.makeText(context, "Выберите хотя бы одну сложность", Toast.LENGTH_SHORT).show()
             s == null || s.apiKey.isBlank() ->
                 Toast.makeText(context, "Сначала добавьте ключ OpenRouter в Настройках", Toast.LENGTH_SHORT).show()
             else -> {
@@ -1770,7 +1777,7 @@ fun QuestionBankScreen(
                         settings = s,
                         topic = pdfTopic.trim(),
                         count = genCount,
-                        difficulty = genDifficulty,
+                        difficulties = genDifficulties,
                         textbookText = textbookText
                     )
                     pdfGenerating = false
@@ -1874,6 +1881,8 @@ fun QuestionBankScreen(
             Toast.makeText(context, "Сначала добавьте ключ OpenRouter в Настройках", Toast.LENGTH_SHORT).show()
         } else if (genTopic.isBlank()) {
             Toast.makeText(context, "Введите тему", Toast.LENGTH_SHORT).show()
+        } else if (genDifficulties.isEmpty()) {
+            Toast.makeText(context, "Выберите хотя бы одну сложность", Toast.LENGTH_SHORT).show()
         } else {
             generating = true
             genResult = null
@@ -1883,7 +1892,7 @@ fun QuestionBankScreen(
                     settings = s,
                     topic = genTopic.trim(),
                     count = genCount,
-                    difficulty = genDifficulty
+                    difficulties = genDifficulties
                 )
                 generating = false
                 if (outcome.questions.isNotEmpty()) {
@@ -2098,15 +2107,21 @@ fun QuestionBankScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 listOf(
-                                    "any" to "Любая",
                                     "easy" to "Лёгкий",
                                     "medium" to "Средний",
                                     "hard" to "Сложный"
                                 ).forEach { (value, label) ->
                                     ChoiceChip(
                                         label = label,
-                                        selected = genDifficulty == value,
-                                        onClick = { genDifficulty = value },
+                                        selected = value in genDifficulties,
+                                        onClick = {
+                                            genDifficulties =
+                                                if (value in genDifficulties) {
+                                                    ArrayList(genDifficulties - value)
+                                                } else {
+                                                    ArrayList(genDifficulties + value)
+                                                }
+                                        },
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -2339,15 +2354,21 @@ fun QuestionBankScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 listOf(
-                                    "any" to "Любая",
                                     "easy" to "Лёгкий",
                                     "medium" to "Средний",
                                     "hard" to "Сложный"
                                 ).forEach { (value, label) ->
                                     ChoiceChip(
                                         label = label,
-                                        selected = genDifficulty == value,
-                                        onClick = { genDifficulty = value },
+                                        selected = value in genDifficulties,
+                                        onClick = {
+                                            genDifficulties =
+                                                if (value in genDifficulties) {
+                                                    ArrayList(genDifficulties - value)
+                                                } else {
+                                                    ArrayList(genDifficulties + value)
+                                                }
+                                        },
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -2394,42 +2415,6 @@ fun QuestionBankScreen(
                                     fontSize = 12.sp,
                                     color = if (pdfIsError) Color(0xFFC62828) else Color(0xFF0E7C6B)
                                 )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "Превью текста",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFFF5F7F6),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                val previewText = pdfText
-                                if (previewText.isNullOrEmpty()) {
-                                    Text(
-                                        text = "Текст не извлечён (возможно, PDF — это сканы картинок)",
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(14.dp)
-                                    )
-                                } else {
-                                    Text(
-                                        text = if (previewText.length > 2000) {
-                                            previewText.take(2000) + "…"
-                                        } else {
-                                            previewText
-                                        },
-                                        fontSize = 13.sp,
-                                        modifier = Modifier
-                                            .padding(14.dp)
-                                            .heightIn(max = 220.dp)
-                                            .verticalScroll(rememberScrollState())
-                                    )
-                                }
                             }
                         }
                     }

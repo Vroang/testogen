@@ -16,11 +16,11 @@ object DraftBuilder {
 
     fun filterQuestions(
         all: List<Question>,
-        difficultyFilter: String,
+        difficulties: Collection<String>,
         trickyEnabled: Boolean,
         topicFilter: String = ""
     ): List<Question> = all.filter { question ->
-        (difficultyFilter == "all" || question.difficulty == difficultyFilter) &&
+        question.difficulty in difficulties &&
             (trickyEnabled || !question.tricky) &&
             (topicFilter.isBlank() || question.topic.equals(topicFilter, ignoreCase = true))
     }

@@ -162,11 +162,13 @@ object OpenRouterClient {
         }
     }
 
-    private fun difficultyText(difficulty: String): String = when (difficulty) {
-        "easy" -> "лёгкий"
-        "hard" -> "сложный"
-        "medium" -> "средний"
-        else -> "разный"
+    private fun difficultyText(difficulties: Collection<String>): String {
+        val names = buildList {
+            if ("easy" in difficulties) add("лёгкий")
+            if ("medium" in difficulties) add("средний")
+            if ("hard" in difficulties) add("сложный")
+        }
+        return if (names.isEmpty()) "разный" else names.joinToString(", ")
     }
 
     /**
@@ -199,11 +201,15 @@ object OpenRouterClient {
     fun buildTopicPrompts(
         topic: String,
         count: Int,
-        difficulty: String,
+        difficulties: Collection<String>,
         ai: AiInstructions
     ): Pair<String, String> {
+        val distribution = if (difficulties.size > 1) {
+            "Распредели вопросы по этим сложностям примерно поровну.\n"
+        } else ""
         val user = "Составь ровно $count тестовых вопросов по теме «$topic».\n" +
-            "Уровень сложности вопросов: ${difficultyText(difficulty)}.\n" +
+            "Уровень сложности вопросов: ${difficultyText(difficulties)}.\n" +
+            distribution +
             "Требования:\n" +
             "- у каждого вопроса ровно 4 варианта ответа, ровно один правильный;\n" +
             "- фактическая точность, однозначность, школьная программа;\n" +
@@ -220,7 +226,7 @@ object OpenRouterClient {
     fun buildPdfPrompts(
         topic: String,
         count: Int,
-        difficulty: String,
+        difficulties: Collection<String>,
         textbookText: String,
         ai: AiInstructions
     ): Pair<String, String> {
@@ -229,7 +235,9 @@ object OpenRouterClient {
             "Если в тексте недостаточно материала для $count вопросов — сделай сколько сможешь."
         val user = "Тема/класс: $topic\n" +
             "Количество вопросов: $count\n" +
-            "Сложность: ${difficultyText(difficulty)}\n\n" +
+            "Сложность: ${difficultyText(difficulties)}\n" +
+            (if (difficulties.size > 1) "Распредели вопросы по этим сложностям примерно поровну.\n" else "") +
+            "\n" +
             "Текст учебника:\n$textbookText\n\n" +
             "Верни строгий JSON: " +
             "[{\"text\": \"...\", \"options\": [\"...\", \"...\", \"...\", \"...\"], \"correct\": 0-3}, ...]"
@@ -346,9 +354,9 @@ object AiQuestionGenerator {
         settings: AppSettings,
         topic: String,
         count: Int,
-        difficulty: String,
+        difficulties: Collection<String>,
         operation: String = "topic"
-    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty, operation, topic) { n, d ->
+    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulties, operation, topic) { n, d ->
         OpenRouterClient.buildTopicPrompts(topic, n, d, settings.toAiInstructions())
     }
 
@@ -358,9 +366,9 @@ object AiQuestionGenerator {
         settings: AppSettings,
         topic: String,
         count: Int,
-        difficulty: String,
+        difficulties: Collection<String>,
         textbookText: String
-    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty, "pdf", topic) { n, d ->
+    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulties, "pdf", topic) { n, d ->
         OpenRouterClient.buildPdfPrompts(topic, n, d, textbookText, settings.toAiInstructions())
     }
 
@@ -368,10 +376,10 @@ object AiQuestionGenerator {
         apiKey: String,
         settings: AppSettings,
         count: Int,
-        difficulty: String,
+        difficulties: Collection<String>,
         operation: String,
         requestPreview: String,
-        prompts: (Int, String) -> Pair<String, String>
+        prompts: (Int, Collection<String>) -> Pair<String, String>
     ): GenerationOutcome {
         val all = buildList {
             if (settings.lastWorking.isNotBlank()) add(settings.lastWorking)
@@ -391,7 +399,7 @@ object AiQuestionGenerator {
         }
         val report = StringBuilder()
         for (model in order) {
-            val (systemPrompt, userPrompt) = prompts(count, difficulty)
+            val (systemPrompt, userPrompt) = prompts(count, difficulties)
             when (
                 val r = OpenRouterClient.generateRaw(
                     apiKey, model, systemPrompt, userPrompt,
@@ -403,7 +411,7 @@ object AiQuestionGenerator {
                     val parsed = parseQuestions(r.text)
                     if (parsed.isNotEmpty()) {
                         val fixed = parsed
-                            .map { q -> q.copy(difficulty = if (difficulty == "any") q.difficulty else difficulty) }
+                            .map { q -> q.copy(difficulty = difficulties.random()) }
                             .take(count)
                         AiLogger.log(operation, "success", model, "${fixed.size} вопросов", requestPreview)
                         return GenerationOutcome(fixed, model, report.toString())
