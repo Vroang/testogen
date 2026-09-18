@@ -15,9 +15,9 @@ android {
         minSdk = 26
         targetSdk = 34
         // AGP требует versionCode >= 1; номер растёт монотонно
-        // (шаг 3.1 занял 6, поэтому шаг 24 = 33)
-        versionCode = 33
-        versionName = "0.24-step24"
+        // (шаг 3.1 занял 6, поэтому шаг 25 = 35)
+        versionCode = 35
+        versionName = "0.25-step25"
     }
 
     signingConfigs {
@@ -74,6 +74,4 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
 
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-
-    implementation("com.github.supersu-man:apkupdater-library:v2.1.0")
 }

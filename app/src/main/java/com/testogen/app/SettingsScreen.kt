@@ -95,7 +95,11 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenAiInstructions: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenAiInstructions: () -> Unit,
+    onOpenAiLog: () -> Unit
+) {
     val context = LocalContext.current
     val repo = (context.applicationContext as TestoGenApp).settingsRepository
     val scope = rememberCoroutineScope()
@@ -572,6 +576,37 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiInstructions: () -> Unit) {
                 ) {
                     Text(
                         text = "Открыть редактор",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            SettingsCard {
+                SectionLabel("Журнал ИИ")
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Последние запросы к моделям: какая пробовалась, " +
+                        "что упало и почему. Помогает понять, почему вопросы не сгенерировались.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenAiLog,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(
+                        text = "Посмотреть последние запросы",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )

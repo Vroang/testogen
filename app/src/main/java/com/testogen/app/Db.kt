@@ -107,14 +107,45 @@ interface ReplacementReasonDao {
     suspend fun deleteAll()
 }
 
+// Шаг 25: журнал обращений к ИИ (диагностика каскада моделей).
+@Entity(tableName = "ai_log", indices = [Index(value = ["timestamp"])])
+data class AiLogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Long,
+    val model: String,
+    val operation: String,
+    val status: String,
+    val message: String,
+    val requestPreview: String
+)
+
+@Dao
+interface AiLogDao {
+    @Insert
+    suspend fun insert(entry: AiLogEntry)
+
+    @Query("SELECT * FROM ai_log ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getLatest(limit: Int = 50): List<AiLogEntry>
+
+    @Query("SELECT * FROM ai_log ORDER BY timestamp DESC LIMIT :limit")
+    fun getLatestFlow(limit: Int = 50): Flow<List<AiLogEntry>>
+
+    @Query("DELETE FROM ai_log")
+    suspend fun clearAll()
+
+    @Query("DELETE FROM ai_log WHERE id NOT IN (SELECT id FROM ai_log ORDER BY timestamp DESC, id DESC LIMIT :keep)")
+    suspend fun trimOlderThan(keep: Int = 200)
+}
+
 @Database(
-    entities = [Question::class, ReplacementReason::class],
-    version = 5,
+    entities = [Question::class, ReplacementReason::class, AiLogEntry::class],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun questionDao(): QuestionDao
     abstract fun replacementReasonDao(): ReplacementReasonDao
+    abstract fun aiLogDao(): AiLogDao
 
     companion object {
         // Шаг 4: добавляется таблица причин замен; банк вопросов сохраняется.
@@ -151,6 +182,23 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_createdAt ON questions(createdAt)")
             }
         }
+
+        // Шаг 25: таблица журнала ИИ (банк и причины замен сохраняются).
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS ai_log (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "timestamp INTEGER NOT NULL, " +
+                        "model TEXT NOT NULL, " +
+                        "operation TEXT NOT NULL, " +
+                        "status TEXT NOT NULL, " +
+                        "message TEXT NOT NULL, " +
+                        "requestPreview TEXT NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_log_timestamp ON ai_log(timestamp)")
+            }
+        }
     }
 }
 
@@ -161,7 +209,8 @@ class TestoGenApp : Application() {
                 AppDatabase.MIGRATION_1_2,
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
-                AppDatabase.MIGRATION_4_5
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6
             )
             .build()
     }
@@ -171,5 +220,40 @@ class TestoGenApp : Application() {
     override fun onCreate() {
         super.onCreate()
         PDFBoxResourceLoader.init(applicationContext)
+        AiLogger.init(database.aiLogDao())
+    }
+}
+
+// Шаг 25: запись в журнал ИИ. Ошибки логирования никогда
+// не ломают генерацию — глотаются молча.
+object AiLogger {
+    private var dao: AiLogDao? = null
+
+    fun init(aiLogDao: AiLogDao) {
+        dao = aiLogDao
+    }
+
+    suspend fun log(
+        operation: String,
+        status: String,
+        model: String,
+        message: String,
+        requestPreview: String = ""
+    ) {
+        try {
+            val target = dao ?: return
+            target.insert(
+                AiLogEntry(
+                    timestamp = System.currentTimeMillis(),
+                    model = model,
+                    operation = operation,
+                    status = status,
+                    message = message.take(200),
+                    requestPreview = requestPreview.take(80)
+                )
+            )
+            target.trimOlderThan(200)
+        } catch (e: Exception) {
+        }
     }
 }

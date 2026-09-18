@@ -283,7 +283,11 @@ object OpenRouterClient {
                     }
                 }
             } catch (e: Exception) {
-                GenerationText.Failed("Нет соединения")
+                if (e is java.net.SocketTimeoutException) {
+                    GenerationText.Failed("превышено время ожидания")
+                } else {
+                    GenerationText.Failed("Нет соединения")
+                }
             }
         }
 }
@@ -342,8 +346,9 @@ object AiQuestionGenerator {
         settings: AppSettings,
         topic: String,
         count: Int,
-        difficulty: String
-    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty) { n, d ->
+        difficulty: String,
+        operation: String = "topic"
+    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty, operation, topic) { n, d ->
         OpenRouterClient.buildTopicPrompts(topic, n, d, settings.toAiInstructions())
     }
 
@@ -355,7 +360,7 @@ object AiQuestionGenerator {
         count: Int,
         difficulty: String,
         textbookText: String
-    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty) { n, d ->
+    ): GenerationOutcome = runCascade(apiKey, settings, count, difficulty, "pdf", topic) { n, d ->
         OpenRouterClient.buildPdfPrompts(topic, n, d, textbookText, settings.toAiInstructions())
     }
 
@@ -364,6 +369,8 @@ object AiQuestionGenerator {
         settings: AppSettings,
         count: Int,
         difficulty: String,
+        operation: String,
+        requestPreview: String,
         prompts: (Int, String) -> Pair<String, String>
     ): GenerationOutcome {
         val all = buildList {
@@ -398,15 +405,25 @@ object AiQuestionGenerator {
                         val fixed = parsed
                             .map { q -> q.copy(difficulty = if (difficulty == "any") q.difficulty else difficulty) }
                             .take(count)
+                        AiLogger.log(operation, "success", model, "${fixed.size} вопросов", requestPreview)
                         return GenerationOutcome(fixed, model, report.toString())
                     }
                     report.append("• ").append(model).append(": не удалось разобрать ответ\n")
+                    AiLogger.log(operation, "error", model, "не удалось разобрать ответ", requestPreview)
                 }
-                is GenerationText.RateLimited ->
+                is GenerationText.RateLimited -> {
                     report.append("• ").append(model).append(": лимит исчерпан (429)\n")
+                    AiLogger.log(operation, "limit", model, "лимит запросов (429)", requestPreview)
+                }
                 is GenerationText.Failed -> {
                     if (r.message.contains("не найдена")) deadModels.add(model)
                     report.append("• ").append(model).append(": ").append(r.message).append('\n')
+                    val status = when {
+                        r.message.contains("не найдена") -> "not_found"
+                        r.message.contains("время ожидания") -> "timeout"
+                        else -> "error"
+                    }
+                    AiLogger.log(operation, status, model, r.message, requestPreview)
                 }
             }
         }
@@ -458,14 +475,25 @@ object AiQuestionGenerator {
                         .distinct()
                     if (rules.isNotEmpty()) {
                         deadModels.remove(model)
+                        AiLogger.log("squeeze", "success", model, "${rules.size} правил", reasonsList)
                         return SqueezeOutcome(rules, null)
                     }
                     lastError = "не удалось разобрать ответ"
+                    AiLogger.log("squeeze", "error", model, lastError, reasonsList)
                 }
-                is GenerationText.RateLimited -> lastError = "лимит исчерпан (429)"
+                is GenerationText.RateLimited -> {
+                    lastError = "лимит исчерпан (429)"
+                    AiLogger.log("squeeze", "limit", model, "лимит запросов (429)", reasonsList)
+                }
                 is GenerationText.Failed -> {
                     if (r.message.contains("не найдена")) deadModels.add(model)
                     lastError = r.message
+                    val status = when {
+                        r.message.contains("не найдена") -> "not_found"
+                        r.message.contains("время ожидания") -> "timeout"
+                        else -> "error"
+                    }
+                    AiLogger.log("squeeze", status, model, r.message, reasonsList)
                 }
             }
         }

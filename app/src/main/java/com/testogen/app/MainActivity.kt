@@ -111,6 +111,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,7 +121,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import com.supersuman.apkupdater.ApkUpdater
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -133,6 +133,9 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 // Шаг 24: иконка «книга» (Material MenuBook) — рисуется кодом,
@@ -260,11 +263,15 @@ fun AppNavigation() {
         composable("settings") {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onOpenAiInstructions = { navController.navigate("ai_instructions_editor") }
+                onOpenAiInstructions = { navController.navigate("ai_instructions_editor") },
+                onOpenAiLog = { navController.navigate("ai_log") }
             )
         }
         composable("ai_instructions_editor") {
             AiInstructionsScreen(onBack = { navController.popBackStack() })
+        }
+        composable("ai_log") {
+            AiLogScreen(onBack = { navController.popBackStack() })
         }
     }
 }
@@ -321,24 +328,17 @@ fun MainScreen(
 
     LaunchedEffect(topic) { AppState.mainTopic = topic }
 
-    var updateAvailable by remember { mutableStateOf(false) }
-    val updateChecker = remember {
-        ApkUpdater(
-            context as android.app.Activity,
-            "https://github.com/Vroang/testogen/releases/latest"
-        )
-    }
+    var pendingUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
 
     // Проверка обновлений — один раз за запуск приложения
     LaunchedEffect(Unit) {
         if (MainActivity.updateCheckStarted) return@LaunchedEffect
         MainActivity.updateCheckStarted = true
-        withContext(Dispatchers.IO) {
-            try {
-                if (updateChecker.isNewUpdateAvailable() == true) {
-                    updateAvailable = true
-                }
-            } catch (e: Exception) { }
+        val release = withContext(Dispatchers.IO) {
+            UpdaterClient.checkLatestRelease()
+        }
+        if (release != null && release.versionCode > BuildConfig.VERSION_CODE) {
+            pendingUpdate = release
         }
     }
     var topUpRunning by remember { mutableStateOf(false) }
@@ -431,7 +431,8 @@ fun MainScreen(
                         settings = s,
                         topic = topic.ifBlank { "общая тематика теста" },
                         count = portion,
-                        difficulty = difficultyFilter
+                        difficulty = difficultyFilter,
+                        operation = "topup"
                     )
                     if (outcome.questions.isNotEmpty()) {
                         val now = System.currentTimeMillis()
@@ -1003,9 +1004,9 @@ fun MainScreen(
         )
     }
 
-    if (updateAvailable) {
+    pendingUpdate?.let { release ->
         AlertDialog(
-            onDismissRequest = { updateAvailable = false },
+            onDismissRequest = { pendingUpdate = null },
             title = {
                 Text(
                     text = "Доступно обновление",
@@ -1015,18 +1016,14 @@ fun MainScreen(
             },
             text = {
                 Text(
-                    text = "Установить новую версию?",
+                    text = "Установить новую версию ${release.versionName}?",
                     fontSize = 15.sp
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    updateAvailable = false
-                    scope.launch {
-                        try {
-                            withContext(Dispatchers.IO) { updateChecker.requestDownload() }
-                        } catch (e: Exception) { }
-                    }
+                    pendingUpdate = null
+                    UpdaterClient.downloadAndInstall(context, release)
                 }) {
                     Text(
                         text = "Обновить",
@@ -1036,7 +1033,7 @@ fun MainScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { updateAvailable = false }) {
+                TextButton(onClick = { pendingUpdate = null }) {
                     Text(text = "Позже", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -3845,5 +3842,161 @@ private fun ManualReplaceForm(onCancel: () -> Unit, onReplace: (Question) -> Uni
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+// Шаг 25: экран «Журнал ИИ» — последние запросы к моделям.
+private val aiLogStatusColors = mapOf(
+    "success" to Color(0xFF2E7D32),
+    "error" to Color(0xFFC62828),
+    "limit" to Color(0xFFEF6C00),
+    "not_found" to Color(0xFF757575),
+    "timeout" to Color(0xFFF9A825)
+)
+
+private fun aiLogStatusLabel(status: String): String = when (status) {
+    "success" -> "успех"
+    "error" -> "ошибка"
+    "limit" -> "лимит"
+    "not_found" -> "не найдена"
+    "timeout" -> "таймаут"
+    else -> status
+}
+
+private fun aiLogOperationLabel(operation: String): String = when (operation) {
+    "topic" -> "Тема"
+    "pdf" -> "Файл"
+    "topup" -> "Добор"
+    "replace" -> "Замена"
+    "squeeze" -> "Сжатие"
+    else -> operation
+}
+
+@Composable
+fun AiLogScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val db = (context.applicationContext as TestoGenApp).database
+    val entries by db.aiLogDao().getLatestFlow(50).collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    var confirmClear by remember { mutableStateOf(false) }
+    val timeFormat = remember { SimpleDateFormat("d MMM HH:mm", Locale("ru")) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text(
+                text = "Журнал ИИ",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { confirmClear = true }) {
+                Text(text = "Очистить", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Text(
+            text = "Последние 50 запросов. Обновляется автоматически.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (entries.isEmpty()) {
+            Text(
+                text = "Пока пусто",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(20.dp)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(entries) { entry ->
+                    val statusColor = aiLogStatusColors[entry.status] ?: Color(0xFF757575)
+                    OutlinedCard(shape = RoundedCornerShape(14.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(statusColor)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = aiLogStatusLabel(entry.status),
+                                    color = statusColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Text(
+                                    text = timeFormat.format(Date(entry.timestamp)),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = entry.model,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = aiLogOperationLabel(entry.operation) +
+                                    if (entry.message.isNotBlank()) " · " + entry.message else "",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            text = { Text(text = "Очистить журнал ИИ?", fontSize = 15.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    scope.launch { db.aiLogDao().clearAll() }
+                }) {
+                    Text(
+                        text = "Очистить",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text(text = "Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
     }
 }
