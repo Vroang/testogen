@@ -64,6 +64,29 @@ interface QuestionDao {
     suspend fun deleteAll()
 }
 
+// Шаг 24: фильтр ИИ-дублей. Сравнение по «нормализованному» тексту —
+// нижний регистр, без пробелов, без хвостовых знаков ? ! .
+// В банк сохраняется исходный текст вопроса БЕЗ изменений.
+fun normalizeQuestionText(raw: String): String =
+    raw.lowercase().filter { !it.isWhitespace() }.trimEnd('?', '!', '.')
+
+// Возвращает: сколько сохранено, сколько отброшено как дубли.
+suspend fun QuestionDao.insertUnique(questions: List<Question>): Pair<Int, Int> {
+    val known = getAllOnce().mapTo(mutableSetOf()) { normalizeQuestionText(it.text) }
+    val fresh = mutableListOf<Question>()
+    var duplicates = 0
+    for (question in questions) {
+        val key = normalizeQuestionText(question.text)
+        if (key.isEmpty() || !known.add(key)) {
+            duplicates++
+        } else {
+            fresh.add(question)
+        }
+    }
+    fresh.forEach { insert(it) }
+    return fresh.size to duplicates
+}
+
 @Entity(tableName = "replacement_reasons")
 data class ReplacementReason(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

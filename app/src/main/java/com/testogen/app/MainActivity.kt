@@ -66,6 +66,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -98,6 +99,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -130,6 +134,50 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+// Шаг 24: иконка «книга» (Material MenuBook) — рисуется кодом,
+// чтобы не подключать библиотеку material-icons-extended.
+private val MenuBookIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "MenuBookFilled",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = SolidColor(Color.Black),
+            fillAlpha = 1f,
+            strokeAlpha = 1f
+        ) {
+            moveTo(21f, 5f)
+            curveToRelative(-1.11f, -0.35f, -2.33f, -0.5f, -3.5f, -0.5f)
+            curveToRelative(-1.95f, 0f, -4.05f, 0.4f, -5.5f, 1.5f)
+            curveToRelative(-1.45f, -1.1f, -3.55f, -1.5f, -5.5f, -1.5f)
+            curveTo(4.55f, 4.5f, 2.45f, 4.9f, 1f, 6f)
+            lineTo(1f, 20.65f)
+            curveToRelative(0f, 0.25f, 0.25f, 0.5f, 0.5f, 0.5f)
+            curveToRelative(0.1f, 0f, 0.15f, -0.05f, 0.25f, -0.05f)
+            curveTo(3.1f, 20.45f, 5.05f, 20f, 6.5f, 20f)
+            curveToRelative(1.95f, 0f, 4.05f, 0.4f, 5.5f, 1.5f)
+            curveToRelative(1.35f, -0.85f, 3.8f, -1.5f, 5.5f, -1.5f)
+            curveToRelative(1.65f, 0f, 3.35f, 0.3f, 4.75f, 1.05f)
+            curveToRelative(0.1f, 0.05f, 0.15f, 0.05f, 0.25f, 0.05f)
+            curveToRelative(0.25f, 0f, 0.5f, -0.25f, 0.5f, -0.5f)
+            lineTo(23f, 6f)
+            curveToRelative(-0.6f, -0.45f, -1.25f, -0.75f, -2f, -1f)
+            close()
+            moveTo(21f, 18.5f)
+            curveToRelative(-1.1f, -0.35f, -2.3f, -0.5f, -3.5f, -0.5f)
+            curveToRelative(-1.7f, 0f, -4.15f, 0.65f, -5.5f, 1.5f)
+            lineTo(12f, 8f)
+            curveToRelative(1.35f, -0.85f, 3.8f, -1.5f, 5.5f, -1.5f)
+            curveToRelative(1.2f, 0f, 2.4f, 0.15f, 3.5f, 0.5f)
+            lineTo(21f, 18.5f)
+            close()
+        }
+    }.build()
+}
 
 object AppState {
     /** Тема с главного экрана (для автоподстановки в банк/формы). */
@@ -373,9 +421,11 @@ fun MainScreen(
             emptyTopicDraft = null
             scope.launch {
                 var added = 0
+                var generated = 0
+                var dups = 0
                 var failed = false
-                while (added < toAdd && !topUpStopRequested && !failed) {
-                    val portion = minOf(5, toAdd - added)
+                while (added < toAdd && generated < toAdd && !topUpStopRequested && !failed) {
+                    val portion = minOf(10, toAdd - generated)
                     val outcome = AiQuestionGenerator.generate(
                         apiKey = s.apiKey,
                         settings = s,
@@ -385,35 +435,43 @@ fun MainScreen(
                     )
                     if (outcome.questions.isNotEmpty()) {
                         val now = System.currentTimeMillis()
-                        outcome.questions.forEachIndexed { index, q ->
-                            db.questionDao().insert(
-                                Question(
-                                    text = q.text.trim(),
-                                    optionA = q.options.getOrElse(0) { "" }.trim(),
-                                    optionB = q.options.getOrElse(1) { "" }.trim(),
-                                    optionC = q.options.getOrElse(2) { "" }.trim(),
-                                    optionD = q.options.getOrElse(3) { "" }.trim(),
-                                    correctIndex = q.correct,
-                                    difficulty = if (difficultyFilter == "all") {
-                                        q.difficulty
-                                    } else {
-                                        difficultyFilter
-                                    },
-                                    tricky = false,
-                                    createdAt = now - index,
-                                    source = "ai",
-                                    topic = topic.trim()
-                                )
+                        val candidates = outcome.questions.mapIndexed { index, q ->
+                            Question(
+                                text = q.text.trim(),
+                                optionA = q.options.getOrElse(0) { "" }.trim(),
+                                optionB = q.options.getOrElse(1) { "" }.trim(),
+                                optionC = q.options.getOrElse(2) { "" }.trim(),
+                                optionD = q.options.getOrElse(3) { "" }.trim(),
+                                correctIndex = q.correct,
+                                difficulty = if (difficultyFilter == "all") {
+                                    q.difficulty
+                                } else {
+                                    difficultyFilter
+                                },
+                                tricky = false,
+                                createdAt = now - index,
+                                source = "ai",
+                                topic = topic.trim()
                             )
                         }
+                        val (fresh, dupCount) = db.questionDao().insertUnique(candidates)
                         outcome.modelUsed?.let { settingsRepo.saveLastWorking(it) }
-                        added += outcome.questions.size
+                        added += fresh
+                        dups += dupCount
                         topUpDone = added
+                        generated += outcome.questions.size
                     } else {
                         failed = true
                     }
                 }
                 topUpRunning = false
+                if (dups > 0) {
+                    Toast.makeText(
+                        context,
+                        "Добавлено $added вопросов (отброшено $dups дублей)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
                 if (added < toAdd) {
                     if (topUpStopRequested) {
                         Toast.makeText(
@@ -738,16 +796,24 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(96.dp))
             }
 
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = onOpenBank,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(20.dp),
-                shape = CircleShape,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
-                Text(text = "+", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = MenuBookIcon,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Банк",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -1713,26 +1779,33 @@ fun QuestionBankScreen(
                     pdfGenerating = false
                     if (outcome.questions.isNotEmpty()) {
                         val now = System.currentTimeMillis()
-                        outcome.questions.forEachIndexed { index, q ->
-                            db.questionDao().insert(
-                                Question(
-                                    text = q.text.trim(),
-                                    optionA = q.options.getOrElse(0) { "" }.trim(),
-                                    optionB = q.options.getOrElse(1) { "" }.trim(),
-                                    optionC = q.options.getOrElse(2) { "" }.trim(),
-                                    optionD = q.options.getOrElse(3) { "" }.trim(),
-                                    correctIndex = q.correct,
-                                    difficulty = q.difficulty,
-                                    tricky = false,
-                                    createdAt = now - index,
-                                    source = "pdf",
-                                    topic = pdfTopic.trim()
-                                )
+                        val candidates = outcome.questions.mapIndexed { index, q ->
+                            Question(
+                                text = q.text.trim(),
+                                optionA = q.options.getOrElse(0) { "" }.trim(),
+                                optionB = q.options.getOrElse(1) { "" }.trim(),
+                                optionC = q.options.getOrElse(2) { "" }.trim(),
+                                optionD = q.options.getOrElse(3) { "" }.trim(),
+                                correctIndex = q.correct,
+                                difficulty = q.difficulty,
+                                tricky = false,
+                                createdAt = now - index,
+                                source = "pdf",
+                                topic = pdfTopic.trim()
                             )
                         }
+                        val (fresh, dups) = db.questionDao().insertUnique(candidates)
                         outcome.modelUsed?.let { settingsRepo.saveLastWorking(it) }
                         activeTab = "manual"
-                        Toast.makeText(context, "Добавлено ${outcome.questions.size} вопросов", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            when {
+                                fresh == 0 -> "Все сгенерированные вопросы уже есть в банке"
+                                dups > 0 -> "Добавлено $fresh вопросов (отброшено $dups дублей)"
+                                else -> "Добавлено $fresh вопросов"
+                            },
+                            Toast.LENGTH_SHORT
+                        ).show()
                     } else {
                         pdfIsError = true
                         pdfResult = outcome.report.ifBlank { "Не удалось сгенерировать вопросы" }
@@ -1818,26 +1891,33 @@ fun QuestionBankScreen(
                 generating = false
                 if (outcome.questions.isNotEmpty()) {
                     val now = System.currentTimeMillis()
-                    outcome.questions.forEachIndexed { index, q ->
-                        db.questionDao().insert(
-                            Question(
-                                text = q.text.trim(),
-                                optionA = q.options.getOrElse(0) { "" }.trim(),
-                                optionB = q.options.getOrElse(1) { "" }.trim(),
-                                optionC = q.options.getOrElse(2) { "" }.trim(),
-                                optionD = q.options.getOrElse(3) { "" }.trim(),
-                                correctIndex = q.correct,
-                                difficulty = q.difficulty,
-                                    tricky = false,
-                                    createdAt = now - index,
-                                    source = "ai",
-                                    topic = genTopic.trim()
-                                )
-                            )
-                        }
-                        outcome.modelUsed?.let { settingsRepo.saveLastWorking(it) }
-                        activeTab = "manual"
-                    Toast.makeText(context, "Добавлено ${outcome.questions.size} вопросов", Toast.LENGTH_SHORT).show()
+                    val candidates = outcome.questions.mapIndexed { index, q ->
+                        Question(
+                            text = q.text.trim(),
+                            optionA = q.options.getOrElse(0) { "" }.trim(),
+                            optionB = q.options.getOrElse(1) { "" }.trim(),
+                            optionC = q.options.getOrElse(2) { "" }.trim(),
+                            optionD = q.options.getOrElse(3) { "" }.trim(),
+                            correctIndex = q.correct,
+                            difficulty = q.difficulty,
+                            tricky = false,
+                            createdAt = now - index,
+                            source = "ai",
+                            topic = genTopic.trim()
+                        )
+                    }
+                    val (fresh, dups) = db.questionDao().insertUnique(candidates)
+                    outcome.modelUsed?.let { settingsRepo.saveLastWorking(it) }
+                    activeTab = "manual"
+                    Toast.makeText(
+                        context,
+                        when {
+                            fresh == 0 -> "Все сгенерированные вопросы уже есть в банке"
+                            dups > 0 -> "Добавлено $fresh вопросов (отброшено $dups дублей)"
+                            else -> "Добавлено $fresh вопросов"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
                 } else {
                     genIsError = true
                     genResult = outcome.report.ifBlank { "Не удалось сгенерировать вопросы" }
@@ -1998,8 +2078,16 @@ fun QuestionBankScreen(
                                 Spacer(modifier = Modifier.width(18.dp))
                                 StepButton(
                                     symbol = "+",
-                                    enabled = genCount < 20,
+                                    enabled = genCount < 50,
                                     onClick = { genCount += 1 }
+                                )
+                            }
+                            if (genCount > 30) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Генерация может занять несколько минут",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
@@ -2231,8 +2319,16 @@ fun QuestionBankScreen(
                                 Spacer(modifier = Modifier.width(18.dp))
                                 StepButton(
                                     symbol = "+",
-                                    enabled = genCount < 20,
+                                    enabled = genCount < 50,
                                     onClick = { genCount += 1 }
+                                )
+                            }
+                            if (genCount > 30) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Генерация может занять несколько минут",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
