@@ -209,11 +209,26 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation() {
     val navController = rememberNavController()
     val navScope = rememberCoroutineScope()
-    // Шаг 27: не авторизован — сначала экран входа.
-    val startDestination = remember { if (AuthManager.isSignedIn()) "main" else "login" }
+    // Шаг 28.1: стартовый маршрут решается ПОСЛЕ асинхронной
+    // загрузки сохранённой сессии Supabase.
+    var startDestination by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        startDestination = if (AuthManager.isSignedInAsync()) "main" else "login"
+    }
+    val destination = startDestination
+    if (destination == null) {
+        // Пока идёт проверка — маленький индикатор вместо пустого экрана.
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     NavHost(
         navController = navController,
-        startDestination = startDestination,
+        startDestination = destination,
         enterTransition = {
             fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 8 }
         },

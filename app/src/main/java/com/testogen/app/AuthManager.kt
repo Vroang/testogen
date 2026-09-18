@@ -30,6 +30,16 @@ object AuthManager {
         false
     }
 
+    // Шаг 28.1: проверка при старте. Сначала дожидаемся загрузки
+    // сохранённой сессии из хранилища — иначе currentUserOrNull()
+    // возвращает null и пользователь видит экран «Вход».
+    suspend fun isSignedInAsync(): Boolean = try {
+        SupabaseClient.client.auth.awaitInitialization()
+        SupabaseClient.client.auth.currentSessionOrNull() != null
+    } catch (e: Exception) {
+        false
+    }
+
     fun currentUser(): UserInfo? = try {
         SupabaseClient.client.auth.currentUserOrNull()
     } catch (e: Exception) {
