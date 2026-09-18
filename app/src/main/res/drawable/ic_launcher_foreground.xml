@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Основание шапочки: примыкает к ромбу снизу без зазора -->
+    <path
+        android:fillColor="#212121"
+        android:pathData="M43,48 L65,48 L65,67 Q54,76 43,67 Z" />
+    <!-- Ромбовидная пластина шапочки -->
+    <path
+        android:fillColor="#212121"
+        android:pathData="M54,29 L84,45 L54,61 L24,45 Z" />
+    <!-- Кисточка: шнур от правого угла ромба -->
+    <path
+        android:fillColor="#F5B800"
+        android:pathData="M82.8,45 L85.2,45 L85.2,70 L82.8,70 Z" />
+    <!-- Кисточка: шарик -->
+    <path
+        android:fillColor="#F5B800"
+        android:pathData="M80,73.5 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0 Z" />
+</vector>
