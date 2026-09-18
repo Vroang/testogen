@@ -1,20 +1,21 @@
 package com.testogen.app
 
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.Environment
 import android.widget.Toast
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 // Шаг 24.2: самописная проверка обновлений через GitHub API.
@@ -40,12 +41,15 @@ private data class ReleaseDto(
     @SerialName("assets") val assets: List<ReleaseAssetDto> = emptyList()
 )
 
+// Шаг 26.1: понятная ошибка скачивания (показывается пользователю).
+private class DownloadException(message: String) : Exception(message)
+
 object UpdaterClient {
     private const val LATEST_URL = "https://api.github.com/repos/Vroang/testogen/releases/latest"
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    // Возвращает null, если запрос не удался или тег не в формате v<число>.
+    // Возвращает null, если запрос не упал или тег не в формате v<число>.
     suspend fun checkLatestRelease(): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             val client = OkHttpClient.Builder()
@@ -78,39 +82,100 @@ object UpdaterClient {
         }
     }
 
-    // Скачивание через системный DownloadManager; по завершении —
-    // системный установщик APK.
+    // Шаг 26.1: своё скачивание через OkHttp в кэш приложения —
+    // системный DownloadManager падал молча, без уведомлений.
+    // Теперь есть диалог с процентами и явные сообщения об ошибках.
     fun downloadAndInstall(context: Context, release: ReleaseInfo) {
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val request = DownloadManager.Request(Uri.parse(release.apkUrl)).apply {
-            setTitle(release.apkName)
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, release.apkName)
-            setMimeType("application/vnd.android.package-archive")
-            setAllowedOverMetered(true)
-        }
-        val downloadId = dm.enqueue(request)
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                val doneId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                if (doneId != downloadId) return
-                context.unregisterReceiver(this)
-                val uri = dm.getUriForDownloadedFile(downloadId)
-                if (uri == null) {
-                    Toast.makeText(context, "Не удалось скачать обновление", Toast.LENGTH_SHORT).show()
-                    return
+        val progressDialog = AlertDialog.Builder(context)
+            .setTitle("Обновление ${release.versionName}")
+            .setMessage("Скачивание…")
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val target = withContext(Dispatchers.IO) {
+                    val dir = File(context.cacheDir, "downloads").apply {
+                        if (!exists()) mkdirs()
+                    }
+                    dir.listFiles()?.forEach { it.delete() }
+                    File(dir, release.apkName.ifBlank { "update.apk" })
                 }
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(20, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
+                val request = Request.Builder()
+                    .url(release.apkUrl)
+                    .header("User-Agent", "TestogenUpdater/1.0")
+                    .build()
+                withContext(Dispatchers.IO) {
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw DownloadException(
+                                if (response.code == 403 || response.code == 404) {
+                                    "Файл недоступен"
+                                } else {
+                                    "Ошибка сервера (HTTP ${response.code})"
+                                }
+                            )
+                        }
+                        val body = response.body
+                            ?: throw DownloadException("Пустой ответ сервера")
+                        val total = body.contentLength()
+                        val input = body.byteStream()
+                        target.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var done = 0L
+                            var lastPercent = -1
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                output.write(buffer, 0, read)
+                                done += read
+                                if (total > 0) {
+                                    val percent = (done * 100 / total).toInt()
+                                    if (percent != lastPercent) {
+                                        lastPercent = percent
+                                        withContext(Dispatchers.Main) {
+                                            progressDialog.setMessage("Скачивание… $percent%")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                progressDialog.dismiss()
+                val apkUri = FileProvider.getUriForFile(
+                    context,
+                    "com.testogen.app.fileprovider",
+                    target
+                )
                 val install = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(install)
+            } catch (e: Exception) {
+                if (progressDialog.isShowing) progressDialog.dismiss()
+                val message = when {
+                    e is DownloadException -> e.message ?: "Ошибка скачивания"
+                    e is java.net.SocketTimeoutException -> "Превышено время ожидания"
+                    e is java.net.UnknownHostException || e is java.net.ConnectException ->
+                        "Нет соединения"
+                    e is java.io.IOException &&
+                        (e.message?.contains("ENOSPC") == true ||
+                            e.message?.contains("No space") == true) ->
+                        "Недостаточно места на устройстве"
+                    else -> "Ошибка скачивания: ${e.message ?: "неизвестная ошибка"}"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
-        context.applicationContext.registerReceiver(
-            receiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        )
     }
 }
