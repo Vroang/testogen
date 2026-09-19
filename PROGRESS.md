@@ -1,39 +1,38 @@
 # PROGRESS
 
-## Текущий шаг: 28.2 — фикс: ложное «Войдите в аккаунт» при работе с учебниками
-## Статус: собран, тег v41 отправлен, ждёт проверки пользователем
+## Текущий шаг: 28.3 — фикс загрузки в Supabase Storage (InvalidKey)
+## Статус: собран, тег v42 отправлен, ждёт проверки пользователем
 
 ## Что сделано
-- ДИАГНОСТИКА: TextbookRepository проверял авторизацию СИНХРОННЫМ
-  AuthManager.isSignedIn() (currentUserOrNull) в трёх местах —
-  uploadTextbook («Войдите в аккаунт»), deleteTextbook (то же) и
-  брал пользователя через currentUser() для user_id. currentUser
-  пуст до завершения асинхронной инициализации Auth (та же
-  причина, что в шаге 28.1, но в других точках). Случайных
-  signOut нет — проверено (signOut вызывается только из меню
-  «Выйти из аккаунта»).
-- ФИКС:
-  - AuthManager: isSignedInAsync переименован в requireSignedIn
-    (awaitInitialization + currentSessionOrNull), добавлен
-    currentUserAsync (пользователь из загруженной сессии);
-    синхронные isSignedIn/currentUser удалены совсем — чтобы
-    больше не использовать;
-  - AppNavigation: стартовая проверка → requireSignedIn();
-  - TextbookRepository: uploadTextbook, deleteTextbook,
-    fetchParagraphText — все проверки теперь requireSignedIn();
-    пользователь для user_id — currentUserAsync();
-    «Войдите в аккаунт» остаётся только как честный fallback,
-    когда пользователь действительно не вошёл.
-- app/build.gradle.kts: versionCode = 41,
-  versionName = "0.28.2-step28fix2".
-- Экран «Вход», таблицы, Room, каскад, автообновление — не
-  тронуты. Новых библиотек нет.
+- ДИАГНОСТИКА: в ключ объекта Storage передавался путь
+  «textbooks/<uuid>/<имя файла пользователя>». Бакет уже задан
+  через from("textbooks"), а само имя файла бралось как есть —
+  с кириллицей и пробелами («История 7 класс.pdf»). Supabase
+  Storage требует URL-safe ключи → ошибка InvalidKey именно
+  на этапе upload. Авторизация тут ни при чём (шаг 28.2 починил).
+- ФИКС (TextbookRepository):
+  - ключ объекта теперь «<textbookId>.<формат>»
+    (например «707a…-….pdf») — ASCII по построению,
+    от имени файла пользователя не зависит;
+  - в таблицу textbooks в storage_path пишется тот же ключ
+    (без префикса бакета); удаление (Storage + БД) использует
+    его как раньше;
+  - upload вызывает upsert = true (повторная загрузка того же
+    id не падает);
+  - проверка формата (pdf/docx/txt) уже была; MIME не
+    передаётся — Supabase определит сам.
+- app/build.gradle.kts: versionCode = 42,
+  versionName = "0.28.3-step28fix3".
+- Вход, RLS, Room, каскад, автообновление — не тронуты.
+  Новых библиотек нет.
 
 ## Известные проблемы
 —
 ## Заметки
 - Путь к локальному APK:
-  C:\Users\Ivan\Desktop\TestGenerator\apk\ТестоГен-v0.28.2-step28fix2.apk
-- Версионирование: versionCode монотонно растёт (шаг 28.2 = 41).
-- Автопубликация: тег v41 → GitHub Actions → релиз.
+  C:\Users\Ivan\Desktop\TestGenerator\apk\ТестоГен-v0.28.3-step28fix3.apk
+- Версионирование: versionCode монотонно растёт (шаг 28.3 = 42).
+- Автопубликация: тег v42 → GitHub Actions → релиз.
+- Одноразовая уборка: если прошлые попытки оставили «пустые»
+  записи в Supabase → Table Editor → textbooks — удалить вручную.
 - VISION.md и PLAN.md не менялись.

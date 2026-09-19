@@ -101,10 +101,13 @@ object TextbookRepository {
                 val user = AuthManager.currentUserAsync()
                     ?: throw Exception("Не удалось определить пользователя — войдите заново")
                 val bookId = UUID.randomUUID().toString()
-                val storagePath = "textbooks/$bookId/$displayName"
+                // Шаг 28.3: ключ в бакете — только ASCII «<uuid>.<ext>».
+                // Кириллица/пробелы в имени файла давали Storage-ошибку
+                // InvalidKey; бакет "textbooks" указан через from(...).
+                val storagePath = "$bookId.$format"
                 val uploadedAtIso = java.time.Instant.now().toString()
 
-                SupabaseClient.client.storage.from("textbooks").upload(storagePath, bytes)
+                SupabaseClient.client.storage.from("textbooks").upload(storagePath, bytes, true)
                 SupabaseClient.client.postgrest.from("textbooks").insert(
                     TextbookRow(
                         id = bookId,
