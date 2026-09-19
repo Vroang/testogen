@@ -191,12 +191,15 @@ object TextbookRepository {
 
     private fun mapError(e: Exception): Exception {
         val raw = e.message ?: ""
-        return if (raw.contains("413") || raw.contains("too large", ignoreCase = true) ||
-            raw.contains("Payload", ignoreCase = true)
-        ) {
-            Exception("Файл слишком большой для загрузки. Максимум — 50 МБ.")
-        } else {
-            e
+        return when {
+            raw.contains("413") || raw.contains("too large", ignoreCase = true) ||
+                raw.contains("Payload", ignoreCase = true) ->
+                Exception("Файл слишком большой для загрузки. Максимум — 50 МБ.")
+            raw.contains("row-level security", ignoreCase = true) ->
+                Exception(
+                    "Supabase заблокировал запись (RLS). Выполните SQL-скрипт из инструкции шага 28.4 в SQL Editor и повторите."
+                )
+            else -> e
         }
     }
 
