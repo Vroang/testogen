@@ -235,6 +235,8 @@ object TextbookRepository {
         val database = db(context)
         val items = database.pendingDeleteDao().getAllOnce()
         for (item in items) {
+            // Шаг 31: вопросы и причины удаляет QuestionSyncRepository.
+            if (item.type != "textbook") continue
             try {
                 SupabaseClient.client.postgrest.from("paragraphs").delete {
                     filter { eq("textbook_id", item.textbookId) }

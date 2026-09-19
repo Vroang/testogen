@@ -217,8 +217,11 @@ fun AppNavigation() {
         val signedIn = AuthManager.requireSignedIn()
         startDestination = if (signedIn) "main" else "login"
         if (signedIn) {
-            // Шаг 30: догоняем облако в фоне (очередь удалений + pending_upload).
-            navScope.launch { TextbookRepository.syncAllPending(appContext) }
+            // Шаг 30/31: догоняем облако в фоне (учебники + вопросы + причины).
+            navScope.launch {
+                TextbookRepository.syncAllPending(appContext)
+                QuestionSyncRepository.syncAll(appContext)
+            }
         }
     }
     val destination = startDestination
@@ -1665,9 +1668,11 @@ fun NewQuestionScreen(questionId: Long, defaultTopic: String, onBack: () -> Unit
                                             correctIndex = correctIndex,
                                             difficulty = difficulty,
                                             tricky = tricky,
-                                            topic = questionTopic.trim()
+                                            topic = questionTopic.trim(),
+                                            syncStatus = "pending_upload"
                                         )
                                     )
+                                    QuestionSyncRepository.syncPendingQuestions(context)
                                     }
                                     Toast.makeText(context, "Вопрос обновлён", Toast.LENGTH_SHORT).show()
                                     onBack()
@@ -1802,8 +1807,11 @@ fun QuestionBankScreen(
             genTopic = AppState.mainTopic
         }
         if (activeTab == "file") {
-            // Шаг 30: попытка досинхронизировать ожидающие учебники.
-            scope.launch { TextbookRepository.syncAllPending(context.applicationContext) }
+            // Шаг 30/31: попытка досинхронизировать всё ожидающее.
+            scope.launch {
+                TextbookRepository.syncAllPending(context.applicationContext)
+                QuestionSyncRepository.syncAll(context.applicationContext)
+            }
         }
     }
 
@@ -2351,7 +2359,9 @@ fun QuestionBankScreen(
                                     QuestionCard(
                                         question = question,
                                         onDelete = {
-                                            scope.launch { db.questionDao().delete(question) }
+                                            scope.launch {
+                                                QuestionSyncRepository.onQuestionDeleted(context, question)
+                                            }
                                         },
                                         onEdit = { onEditQuestion(question.id) }
                                     )
@@ -2362,7 +2372,9 @@ fun QuestionBankScreen(
                                 QuestionCard(
                                     question = question,
                                     onDelete = {
-                                        scope.launch { db.questionDao().delete(question) }
+                                        scope.launch {
+                                            QuestionSyncRepository.onQuestionDeleted(context, question)
+                                        }
                                     },
                                     onEdit = { onEditQuestion(question.id) }
                                 )
@@ -2494,7 +2506,7 @@ fun QuestionBankScreen(
                 TextButton(
                     onClick = {
                         showClearDialog = false
-                        scope.launch { db.questionDao().deleteAll() }
+                        scope.launch { QuestionSyncRepository.onAllQuestionsDeleted(context) }
                     }
                 ) {
                     Text(text = "Удалить", color = Color(0xFFC62828))
@@ -3001,7 +3013,7 @@ fun DraftScreen(onBack: () -> Unit, onEditQuestion: (Long) -> Unit) {
                 },
                 onDeleteQuestion = {
                     scope.launch {
-                        db.questionDao().delete(target.question)
+                        QuestionSyncRepository.onQuestionDeleted(context, target.question)
                         val updated = variantsState.mapIndexed { vi, qs ->
                             if (vi == target.variantIndex) {
                                 qs.filterIndexed { qi, _ -> qi != target.questionIndex }
@@ -3049,7 +3061,7 @@ fun DraftScreen(onBack: () -> Unit, onEditQuestion: (Long) -> Unit) {
                                 if (outcome.rules != null) {
                                     val joined = outcome.rules.joinToString("\n")
                                     settingsRepo.saveAiAvoid(joined)
-                                    db.replacementReasonDao().deleteAll()
+                                    QuestionSyncRepository.onReasonsCleared(context)
                                     settingsRepo.resetReplacementsSinceSqueeze()
                                     Toast.makeText(
                                         context,
@@ -3094,7 +3106,7 @@ fun DraftScreen(onBack: () -> Unit, onEditQuestion: (Long) -> Unit) {
                     TextButton(onClick = {
                         deleteTarget = null
                         scope.launch {
-                            db.questionDao().delete(target.question)
+                            QuestionSyncRepository.onQuestionDeleted(context, target.question)
                             val updated = variantsState.mapIndexed { vi, qs ->
                                 if (vi == target.variantIndex) {
                                     qs.filterIndexed { qi, _ -> qi != target.questionIndex }

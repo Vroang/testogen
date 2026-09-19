@@ -622,7 +622,10 @@ fun SettingsScreen(
             val appDb = (context.applicationContext as TestoGenApp).database
             val pendingUploads by appDb.textbookDao().countPendingFlow().collectAsState(initial = 0)
             val pendingDeletes by appDb.pendingDeleteDao().countFlow().collectAsState(initial = 0)
-            val pendingTotal = pendingUploads + pendingDeletes
+            // Шаг 31: в очередь входят и вопросы с причинами замен.
+            val pendingQuestions by appDb.questionDao().countPendingFlow().collectAsState(initial = 0)
+            val pendingReasons by appDb.replacementReasonDao().countPendingFlow().collectAsState(initial = 0)
+            val pendingTotal = pendingUploads + pendingDeletes + pendingQuestions + pendingReasons
             var restoring by remember { mutableStateOf(false) }
             SettingsCard {
                 SectionLabel("Синхронизация с облаком")

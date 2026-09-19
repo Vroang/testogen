@@ -123,7 +123,7 @@ fun AiInstructionsScreen(onBack: () -> Unit) {
                         val joined = outcome.rules.joinToString("\n")
                         avoidText = joined
                         repo.saveAiAvoid(joined)
-                        db.replacementReasonDao().deleteAll()
+                        QuestionSyncRepository.onReasonsCleared(context)
                         repo.resetReplacementsSinceSqueeze()
                         Toast.makeText(
                             context,
@@ -144,7 +144,7 @@ fun AiInstructionsScreen(onBack: () -> Unit) {
 
     val clearReasons: () -> Unit = {
         scope.launch {
-            db.replacementReasonDao().deleteAll()
+            QuestionSyncRepository.onReasonsCleared(context)
             repo.resetReplacementsSinceSqueeze()
             avoidText = ""
             repo.saveAiAvoid("")
@@ -166,7 +166,7 @@ fun AiInstructionsScreen(onBack: () -> Unit) {
 
     val factoryReset: () -> Unit = {
         scope.launch {
-            db.replacementReasonDao().deleteAll()
+            QuestionSyncRepository.onReasonsCleared(context)
             repo.resetReplacementsSinceSqueeze()
             systemText = SettingsRepository.DEFAULT_AI_SYSTEM_TEXT
             avoidText = ""

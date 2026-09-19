@@ -35,7 +35,10 @@ data class Question(
     val tricky: Boolean,
     val createdAt: Long,
     @ColumnInfo(defaultValue = "manual") val source: String = "manual",
-    @ColumnInfo(defaultValue = "") val topic: String = ""
+    @ColumnInfo(defaultValue = "") val topic: String = "",
+    // Шаг 31: синхронизация с Supabase
+    val cloudId: String? = null,
+    @ColumnInfo(defaultValue = "pending_upload") val syncStatus: String = "pending_upload"
 )
 
 @Dao
@@ -51,6 +54,12 @@ interface QuestionDao {
 
     @Query("SELECT * FROM questions ORDER BY createdAt DESC")
     suspend fun getAllOnce(): List<Question>
+
+    @Query("SELECT * FROM questions WHERE syncStatus = 'pending_upload'")
+    suspend fun getPendingUpload(): List<Question>
+
+    @Query("SELECT COUNT(*) FROM questions WHERE syncStatus != 'synced'")
+    fun countPendingFlow(): Flow<Int>
 
     @Delete
     suspend fun delete(question: Question)
@@ -93,7 +102,10 @@ data class ReplacementReason(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val replacedQuestionText: String,
     val reason: String,
-    val timestamp: Long
+    val timestamp: Long,
+    // Шаг 31: синхронизация с Supabase
+    val cloudId: String? = null,
+    @ColumnInfo(defaultValue = "pending_upload") val syncStatus: String = "pending_upload"
 )
 
 @Dao
@@ -103,6 +115,15 @@ interface ReplacementReasonDao {
 
     @Query("SELECT * FROM replacement_reasons ORDER BY timestamp DESC")
     suspend fun getAllOnce(): List<ReplacementReason>
+
+    @Query("SELECT * FROM replacement_reasons WHERE syncStatus = 'pending_upload'")
+    suspend fun getPendingUpload(): List<ReplacementReason>
+
+    @Query("SELECT COUNT(*) FROM replacement_reasons WHERE syncStatus != 'synced'")
+    fun countPendingFlow(): Flow<Int>
+
+    @Update
+    suspend fun update(reason: ReplacementReason)
 
     @Query("DELETE FROM replacement_reasons")
     suspend fun deleteAll()
@@ -206,13 +227,16 @@ interface ParagraphDao {
 }
 
 // Шаг 30: очередь удалений, которые ещё не ушли в облако.
+// Шаг 31: type = "textbook" / "question" / "reason".
 @Entity(tableName = "pending_deletes")
 data class PendingDelete(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val textbookId: String,
     val storagePath: String,
     val userId: String,
-    val createdAt: Long
+    val createdAt: Long,
+    @ColumnInfo(defaultValue = "textbook") val type: String = "textbook",
+    @ColumnInfo(defaultValue = "") val cloudId: String = ""
 )
 
 @Dao
@@ -239,7 +263,7 @@ interface PendingDeleteDao {
         Paragraph::class,
         PendingDelete::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -349,6 +373,18 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE textbooks ADD COLUMN userId TEXT NOT NULL DEFAULT ''")
             }
         }
+
+        // Шаг 31: синхронизация вопросов и причин замен.
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE questions ADD COLUMN cloudId TEXT")
+                db.execSQL("ALTER TABLE questions ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'pending_upload'")
+                db.execSQL("ALTER TABLE replacement_reasons ADD COLUMN cloudId TEXT")
+                db.execSQL("ALTER TABLE replacement_reasons ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'pending_upload'")
+                db.execSQL("ALTER TABLE pending_deletes ADD COLUMN type TEXT NOT NULL DEFAULT 'textbook'")
+                db.execSQL("ALTER TABLE pending_deletes ADD COLUMN cloudId TEXT NOT NULL DEFAULT ''")
+            }
+        }
     }
 }
 
@@ -363,7 +399,8 @@ class TestoGenApp : Application() {
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
-                AppDatabase.MIGRATION_8_9
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10
             )
             .build()
     }
