@@ -78,6 +78,11 @@ fun TextbooksScreen(
     var pendingDelete by remember { mutableStateOf<Textbook?>(null) }
     val dateFormat = remember { SimpleDateFormat("d MMM yy", Locale("ru")) }
 
+    // Шаг 30: при открытии списка — догоаляем всё, что ждёт облака.
+    LaunchedEffect(Unit) {
+        TextbookRepository.syncAllPending(context)
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -178,13 +183,18 @@ fun TextbooksScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = book.format.uppercase() + " · " +
-                                        book.paragraphCount + " параграфов · " +
-                                        dateFormat.format(java.util.Date(book.uploadedAt)),
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                        Text(
+                                            text = book.format.uppercase() + " · " +
+                                                book.paragraphCount + " параграфов · " +
+                                                dateFormat.format(java.util.Date(book.uploadedAt)) +
+                                                if (book.syncStatus != "synced") {
+                                                    " · ожидает отправки в облако"
+                                                } else {
+                                                    ""
+                                                },
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                             }
                         }
                     }
@@ -312,18 +322,17 @@ fun TextbookRangeScreen(
 
     LaunchedEffect(textbookId) {
         book = db.textbookDao().getById(textbookId)
-        paragraphs = null
-        TextbookRepository.fetchParagraphs(textbookId).fold(
-            onSuccess = { rows -> paragraphs = rows },
-            onFailure = { e ->
-                paragraphs = emptyList()
-                android.widget.Toast.makeText(
-                    context,
-                    "Не удалось загрузить параграфы: ${e.message ?: "ошибка"}",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
-            }
-        )
+        // Шаг 30: параграфы читаются из локальной базы — работает
+        // без интернета.
+        paragraphs = db.paragraphDao().getByTextbook(textbookId).map {
+            ParagraphRow(
+                number = it.number,
+                title = it.title,
+                startPage = it.startPage,
+                endPage = it.endPage,
+                text = it.text
+            )
+        }
     }
 
     val rows = paragraphs.orEmpty()

@@ -212,8 +212,14 @@ fun AppNavigation() {
     // Шаг 28.1: стартовый маршрут решается ПОСЛЕ асинхронной
     // загрузки сохранённой сессии Supabase.
     var startDestination by remember { mutableStateOf<String?>(null) }
+    val appContext = LocalContext.current.applicationContext
     LaunchedEffect(Unit) {
-        startDestination = if (AuthManager.requireSignedIn()) "main" else "login"
+        val signedIn = AuthManager.requireSignedIn()
+        startDestination = if (signedIn) "main" else "login"
+        if (signedIn) {
+            // Шаг 30: догоняем облако в фоне (очередь удалений + pending_upload).
+            navScope.launch { TextbookRepository.syncAllPending(appContext) }
+        }
     }
     val destination = startDestination
     if (destination == null) {
@@ -1795,6 +1801,10 @@ fun QuestionBankScreen(
         if (activeTab == "internet" && !internetTopicTouched && genTopic.isBlank()) {
             genTopic = AppState.mainTopic
         }
+        if (activeTab == "file") {
+            // Шаг 30: попытка досинхронизировать ожидающие учебники.
+            scope.launch { TextbookRepository.syncAllPending(context.applicationContext) }
+        }
     }
 
     var topicFilter by remember { mutableStateOf<String?>(null) }
@@ -2186,7 +2196,12 @@ fun QuestionBankScreen(
                                                 book.paragraphCount + " параграфов · " +
                                                 textbookDateFormat.format(
                                                     java.util.Date(book.uploadedAt)
-                                                ),
+                                                ) +
+                                                if (book.syncStatus != "synced") {
+                                                    " · ожидает отправки в облако"
+                                                } else {
+                                                    ""
+                                                },
                                             fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

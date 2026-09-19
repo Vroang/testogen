@@ -139,6 +139,7 @@ interface AiLogDao {
 }
 
 // Шаг 27: учебник из библиотеки Supabase (локальный кэш метаданных).
+// Шаг 30: телефон главный — syncStatus ведёт очередь отправки в облако.
 @Entity(tableName = "textbooks")
 data class Textbook(
     @PrimaryKey val id: String,
@@ -147,7 +148,10 @@ data class Textbook(
     val paragraphCount: Int,
     val uploadedAt: Long,
     val storagePath: String,
-    val localCachePath: String? = null
+    val localCachePath: String? = null,
+    // synced / pending_upload / pending_delete
+    @ColumnInfo(defaultValue = "synced") val syncStatus: String = "synced",
+    @ColumnInfo(defaultValue = "") val userId: String = ""
 )
 
 @Dao
@@ -161,13 +165,81 @@ interface TextbookDao {
     @Query("SELECT * FROM textbooks WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): Textbook?
 
+    @Query("SELECT * FROM textbooks WHERE syncStatus = 'pending_upload'")
+    suspend fun getPendingUpload(): List<Textbook>
+
+    @Query("SELECT COUNT(*) FROM textbooks WHERE syncStatus != 'synced'")
+    fun countPendingFlow(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM textbooks")
+    suspend fun countAll(): Int
+
+    @Update
+    suspend fun update(textbook: Textbook)
+
     @Query("DELETE FROM textbooks WHERE id = :id")
     suspend fun delete(id: String)
 }
 
+// Шаг 30: параграфы учебника — теперь локально (телефон главный).
+@Entity(tableName = "paragraphs", indices = [Index(value = ["textbookId"])])
+data class Paragraph(
+    @PrimaryKey val id: String,
+    val textbookId: String,
+    val number: Int,
+    val title: String,
+    val text: String,
+    val startPage: Int,
+    val endPage: Int
+)
+
+@Dao
+interface ParagraphDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(paragraphs: List<Paragraph>)
+
+    @Query("SELECT * FROM paragraphs WHERE textbookId = :textbookId ORDER BY number ASC")
+    suspend fun getByTextbook(textbookId: String): List<Paragraph>
+
+    @Query("DELETE FROM paragraphs WHERE textbookId = :textbookId")
+    suspend fun deleteByTextbook(textbookId: String)
+}
+
+// Шаг 30: очередь удалений, которые ещё не ушли в облако.
+@Entity(tableName = "pending_deletes")
+data class PendingDelete(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val textbookId: String,
+    val storagePath: String,
+    val userId: String,
+    val createdAt: Long
+)
+
+@Dao
+interface PendingDeleteDao {
+    @Insert
+    suspend fun insert(entry: PendingDelete)
+
+    @Query("SELECT * FROM pending_deletes ORDER BY createdAt ASC")
+    suspend fun getAllOnce(): List<PendingDelete>
+
+    @Query("DELETE FROM pending_deletes WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT COUNT(*) FROM pending_deletes")
+    fun countFlow(): Flow<Int>
+}
+
 @Database(
-    entities = [Question::class, ReplacementReason::class, AiLogEntry::class, Textbook::class],
-    version = 7,
+    entities = [
+        Question::class,
+        ReplacementReason::class,
+        AiLogEntry::class,
+        Textbook::class,
+        Paragraph::class,
+        PendingDelete::class
+    ],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -175,6 +247,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun replacementReasonDao(): ReplacementReasonDao
     abstract fun aiLogDao(): AiLogDao
     abstract fun textbookDao(): TextbookDao
+    abstract fun paragraphDao(): ParagraphDao
+    abstract fun pendingDeleteDao(): PendingDeleteDao
 
     companion object {
         // Шаг 4: добавляется таблица причин замен; банк вопросов сохраняется.
@@ -243,6 +317,38 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
         }
+        // Шаг 30: телефон главный — таблицы paragraphs и pending_deletes.
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS paragraphs (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "textbookId TEXT NOT NULL, " +
+                        "number INTEGER NOT NULL, " +
+                        "title TEXT NOT NULL, " +
+                        "text TEXT NOT NULL, " +
+                        "startPage INTEGER NOT NULL, " +
+                        "endPage INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_paragraphs_textbookId ON paragraphs(textbookId)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS pending_deletes (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "textbookId TEXT NOT NULL, " +
+                        "storagePath TEXT NOT NULL, " +
+                        "userId TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        // Шаг 30: поля синхронизации у учебников (старые — уже в облаке).
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE textbooks ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'synced'")
+                db.execSQL("ALTER TABLE textbooks ADD COLUMN userId TEXT NOT NULL DEFAULT ''")
+            }
+        }
     }
 }
 
@@ -255,7 +361,9 @@ class TestoGenApp : Application() {
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
-                AppDatabase.MIGRATION_6_7
+                AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9
             )
             .build()
     }

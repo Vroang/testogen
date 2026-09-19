@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -63,6 +64,9 @@ fun LoginScreen(onSignedIn: () -> Unit) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    // Шаг 30: предложение восстановить учебники из облака после входа.
+    var pendingRestore by remember { mutableStateOf<Int?>(null) }
+    var restoring by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -115,7 +119,22 @@ fun LoginScreen(onSignedIn: () -> Unit) {
                     val result = AuthManager.signIn(email.trim(), password)
                     loading = false
                     result.fold(
-                        onSuccess = { onSignedIn() },
+                        onSuccess = {
+                            // Шаг 30: если в облаке учебников больше, чем
+                            // на устройстве — предложить восстановление.
+                            val cloud = runCatching {
+                                TextbookRepository.cloudTextbookCount()
+                            }.getOrDefault(0)
+                            val local = (context.applicationContext as TestoGenApp)
+                                .database
+                                .textbookDao()
+                                .countAll()
+                            if (cloud > local) {
+                                pendingRestore = cloud
+                            } else {
+                                onSignedIn()
+                            }
+                        },
                         onFailure = { e ->
                             Toast.makeText(
                                 context,
@@ -146,5 +165,55 @@ fun LoginScreen(onSignedIn: () -> Unit) {
                 Text(text = "Войти", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
+    }
+
+    pendingRestore?.let { count ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text(text = "Восстановление") },
+            text = {
+                Text(
+                    text = "Найдено $count учебников в облаке. Восстановить их на этом устройстве?",
+                    fontSize = 15.sp
+                )
+            },
+            confirmButton = {
+                TextButton(enabled = !restoring, onClick = {
+                    restoring = true
+                    scope.launch {
+                        val result = TextbookRepository.restoreFromCloud(context)
+                        restoring = false
+                        pendingRestore = null
+                        result.fold(
+                            onSuccess = { n ->
+                                Toast.makeText(
+                                    context,
+                                    "Восстановлено учебников: $n",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            },
+                            onFailure = { e ->
+                                Toast.makeText(
+                                    context,
+                                    "Не удалось восстановить: ${e.message ?: "ошибка"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+                        onSignedIn()
+                    }
+                }) {
+                    Text(text = "Восстановить", color = MaterialTheme.colorScheme.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !restoring, onClick = {
+                    pendingRestore = null
+                    onSignedIn()
+                }) {
+                    Text(text = "Не сейчас", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
     }
 }

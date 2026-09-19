@@ -618,6 +618,96 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Шаг 30: состояние синхронизации + восстановление из облака.
+            val appDb = (context.applicationContext as TestoGenApp).database
+            val pendingUploads by appDb.textbookDao().countPendingFlow().collectAsState(initial = 0)
+            val pendingDeletes by appDb.pendingDeleteDao().countFlow().collectAsState(initial = 0)
+            val pendingTotal = pendingUploads + pendingDeletes
+            var restoring by remember { mutableStateOf(false) }
+            SettingsCard {
+                SectionLabel("Синхронизация с облаком")
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (pendingTotal == 0) {
+                        "Всё синхронизировано"
+                    } else {
+                        "Синхронизация с облаком: $pendingTotal в очереди"
+                    },
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                var confirmRestore by remember { mutableStateOf(false) }
+                Button(
+                    onClick = { confirmRestore = true },
+                    enabled = !restoring,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(
+                        text = if (restoring) "Восстанавливаем…" else "Восстановить из облака",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (confirmRestore) {
+                    AlertDialog(
+                        onDismissRequest = { confirmRestore = false },
+                        text = {
+                            Text(
+                                text = "Восстановить учебники из облака? Уже скачанные будут пропущены.",
+                                fontSize = 15.sp
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmRestore = false
+                                restoring = true
+                                scope.launch {
+                                    val result = TextbookRepository.restoreFromCloud(context)
+                                    restoring = false
+                                    result.fold(
+                                        onSuccess = { n ->
+                                            Toast.makeText(
+                                                context,
+                                                "Восстановлено учебников: $n",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        },
+                                        onFailure = { e ->
+                                            Toast.makeText(
+                                                context,
+                                                "Не удалось восстановить: ${e.message ?: "ошибка"}",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    )
+                                }
+                            }) {
+                                Text(
+                                    text = "Восстановить",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmRestore = false }) {
+                                Text(text = "Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             var confirmSignOut by remember { mutableStateOf(false) }
             TextButton(
                 onClick = { confirmSignOut = true },

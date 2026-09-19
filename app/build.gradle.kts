@@ -15,9 +15,9 @@ android {
         minSdk = 26
         targetSdk = 34
         // AGP требует versionCode >= 1; номер растёт монотонно
-        // (шаг 3.1 занял 6, поэтому шаг 29 = 44)
-        versionCode = 44
-        versionName = "0.29-step29"
+        // (шаг 3.1 занял 6, поэтому шаг 30 = 45)
+        versionCode = 45
+        versionName = "0.30-step30"
     }
 
     signingConfigs {
