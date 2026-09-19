@@ -55,7 +55,7 @@ object TextbookRepository {
     suspend fun uploadTextbook(context: Context, uri: Uri): Result<Textbook> =
         withContext(Dispatchers.IO) {
             try {
-                if (!AuthManager.isSignedIn()) {
+                if (!AuthManager.requireSignedIn()) {
                     throw Exception("Войдите в аккаунт")
                 }
                 var displayName = "textbook.pdf"
@@ -98,8 +98,8 @@ object TextbookRepository {
                     throw Exception("Не найдено параграфов с маркером § (нужны заголовки вида «§ 12»)")
                 }
 
-                val user = AuthManager.currentUser()
-                    ?: throw Exception("Войдите в аккаунт")
+                val user = AuthManager.currentUserAsync()
+                    ?: throw Exception("Не удалось определить пользователя — войдите заново")
                 val bookId = UUID.randomUUID().toString()
                 val storagePath = "textbooks/$bookId/$displayName"
                 val uploadedAtIso = java.time.Instant.now().toString()
@@ -141,7 +141,7 @@ object TextbookRepository {
     suspend fun deleteTextbook(context: Context, book: Textbook): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                if (!AuthManager.isSignedIn()) {
+                if (!AuthManager.requireSignedIn()) {
                     throw Exception("Войдите в аккаунт")
                 }
                 runCatching {
@@ -165,6 +165,9 @@ object TextbookRepository {
     suspend fun fetchParagraphText(textbookId: String, from: Int, to: Int): Result<String> =
         withContext(Dispatchers.IO) {
             try {
+                if (!AuthManager.requireSignedIn()) {
+                    throw Exception("Войдите в аккаунт")
+                }
                 val rows = SupabaseClient.client.postgrest.from("paragraphs").select {
                     filter {
                         eq("textbook_id", textbookId)

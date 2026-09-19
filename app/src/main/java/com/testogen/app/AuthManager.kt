@@ -5,6 +5,10 @@ import io.github.jan.supabase.gotrue.providers.builtin.Email
 import io.github.jan.supabase.gotrue.user.UserInfo
 
 // Шаг 27: вход/выход через Supabase Auth.
+// Шаг 28.2: проверки авторизации — только после
+// awaitInitialization(): сессия загружается из хранилища
+// асинхронно, и синхронные проверки до этого дают ложное
+// «не авторизован».
 object AuthManager {
 
     suspend fun signIn(email: String, password: String): Result<Unit> = try {
@@ -24,24 +28,18 @@ object AuthManager {
         }
     }
 
-    fun isSignedIn(): Boolean = try {
-        SupabaseClient.client.auth.currentUserOrNull() != null
-    } catch (e: Exception) {
-        false
-    }
-
-    // Шаг 28.1: проверка при старте. Сначала дожидаемся загрузки
-    // сохранённой сессии из хранилища — иначе currentUserOrNull()
-    // возвращает null и пользователь видит экран «Вход».
-    suspend fun isSignedInAsync(): Boolean = try {
+    // Для действий с Supabase: дожидается загрузки сессии.
+    suspend fun requireSignedIn(): Boolean = try {
         SupabaseClient.client.auth.awaitInitialization()
         SupabaseClient.client.auth.currentSessionOrNull() != null
     } catch (e: Exception) {
         false
     }
 
-    fun currentUser(): UserInfo? = try {
-        SupabaseClient.client.auth.currentUserOrNull()
+    // Текущий пользователь после гарантированной инициализации.
+    suspend fun currentUserAsync(): UserInfo? = try {
+        SupabaseClient.client.auth.awaitInitialization()
+        SupabaseClient.client.auth.currentSessionOrNull()?.user
     } catch (e: Exception) {
         null
     }

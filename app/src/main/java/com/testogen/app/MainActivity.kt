@@ -213,7 +213,7 @@ fun AppNavigation() {
     // загрузки сохранённой сессии Supabase.
     var startDestination by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
-        startDestination = if (AuthManager.isSignedInAsync()) "main" else "login"
+        startDestination = if (AuthManager.requireSignedIn()) "main" else "login"
     }
     val destination = startDestination
     if (destination == null) {
