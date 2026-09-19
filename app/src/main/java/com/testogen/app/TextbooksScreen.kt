@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -278,7 +281,8 @@ fun TextbooksScreen(
     }
 }
 
-// Шаг 27: выбор диапазона параграфов и генерация вопросов.
+// Шаг 29: гибкий выбор — по параграфам (галочки) или по страницам,
+// тема вопросов, содержание с названиями и страницами.
 @Composable
 fun TextbookRangeScreen(
     textbookId: String,
@@ -290,8 +294,15 @@ fun TextbookRangeScreen(
     val settings by app.settingsRepository.settings.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var book by remember { mutableStateOf<Textbook?>(null) }
-    var fromText by rememberSaveable { mutableStateOf("") }
-    var toText by rememberSaveable { mutableStateOf("") }
+    var paragraphs by remember { mutableStateOf<List<ParagraphRow>?>(null) }
+    var mode by rememberSaveable { mutableStateOf("paragraphs") }
+    var topic by rememberSaveable { mutableStateOf("") }
+    var quickFrom by rememberSaveable { mutableStateOf("") }
+    var quickTo by rememberSaveable { mutableStateOf("") }
+    var selectedNumbers by rememberSaveable { mutableStateOf(setOf<Int>()) }
+    var contentExpanded by rememberSaveable { mutableStateOf(false) }
+    var pageFromText by rememberSaveable { mutableStateOf("") }
+    var pageToText by rememberSaveable { mutableStateOf("") }
     var countText by rememberSaveable { mutableStateOf("10") }
     var difficulties by rememberSaveable {
         mutableStateOf(arrayListOf("easy", "medium", "hard"))
@@ -301,6 +312,57 @@ fun TextbookRangeScreen(
 
     LaunchedEffect(textbookId) {
         book = db.textbookDao().getById(textbookId)
+        paragraphs = null
+        TextbookRepository.fetchParagraphs(textbookId).fold(
+            onSuccess = { rows -> paragraphs = rows },
+            onFailure = { e ->
+                paragraphs = emptyList()
+                android.widget.Toast.makeText(
+                    context,
+                    "Не удалось загрузить параграфы: ${e.message ?: "ошибка"}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+    val rows = paragraphs.orEmpty()
+    val isPdf = book?.format == "pdf"
+    val quickFromNum = quickFrom.toIntOrNull()
+    val quickToNum = quickTo.toIntOrNull()
+    val pageFrom = pageFromText.toIntOrNull()
+    val pageTo = pageToText.toIntOrNull()
+    val count = countText.toIntOrNull() ?: 0
+
+    val matchingPages = if (pageFrom != null && pageTo != null) {
+        rows.filter { it.startPage <= pageTo && it.endPage >= pageFrom }
+    } else {
+        emptyList()
+    }
+    val pagePreview = when {
+        mode != "pages" -> ""
+        pageFrom == null || pageTo == null -> ""
+        matchingPages.isEmpty() -> "В этом диапазоне нет параграфов"
+        else -> "Будут включены: " + matchingPages.joinToString(", ") { "§ ${it.number}" } +
+            " (страницы $pageFrom–$pageTo)"
+    }
+    val selectedSorted = selectedNumbers.toList().sorted()
+    val defaultTopic = when {
+        mode == "pages" && pageFrom != null && pageTo != null ->
+            "${book?.name ?: "Учебник"}, стр. $pageFrom–$pageTo"
+        selectedSorted.isNotEmpty() ->
+            if (selectedSorted.size == 1) {
+                "${book?.name ?: "Учебник"} § ${selectedSorted.first()}"
+            } else {
+                "${book?.name ?: "Учебник"} § ${selectedSorted.first()}-${selectedSorted.last()}"
+            }
+        else -> book?.name ?: "Учебник"
+    }
+    val finalTopic = topic.ifBlank { defaultTopic }
+    val canGenerate = when {
+        generating -> false
+        mode == "paragraphs" -> selectedNumbers.isNotEmpty()
+        else -> pageFrom != null && pageTo != null && pageFrom <= pageTo && matchingPages.isNotEmpty()
     }
 
     Column(
@@ -326,57 +388,282 @@ fun TextbookRangeScreen(
             )
             Spacer(modifier = Modifier.width(16.dp))
         }
+
         Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-            Spacer(modifier = Modifier.height(12.dp))
+            // Тема вопросов
             Text(
-                text = "Диапазон параграфов",
+                text = "Тема вопросов",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = fromText,
-                    onValueChange = { fromText = it.filter { ch -> ch.isDigit() }.take(4) },
-                    modifier = Modifier.weight(1f),
-                    label = { Text(text = "От §") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                OutlinedTextField(
-                    value = toText,
-                    onValueChange = { toText = it.filter { ch -> ch.isDigit() }.take(4) },
-                    modifier = Modifier.weight(1f),
-                    label = { Text(text = "До §") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = topic,
+                onValueChange = { topic = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                placeholder = { Text(text = "Например: § 4. Реформация", fontSize = 14.sp) }
+            )
+            if (topic.isBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Если оставить пустым — тема подставится автоматически",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Что включить
             Text(
-                text = "Количество вопросов",
+                text = "Что включить",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(10.dp))
-            OutlinedTextField(
-                value = countText,
-                onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(3) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(text = "Сколько вопросов сгенерировать") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp)
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceChip(
+                    label = "По параграфам",
+                    selected = mode == "paragraphs",
+                    onClick = { mode = "paragraphs" },
+                    modifier = Modifier.weight(1f)
+                )
+                ChoiceChip(
+                    label = "По страницам",
+                    selected = mode == "pages",
+                    onClick = {
+                        if (isPdf) {
+                            mode = "pages"
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Выбор по страницам доступен только для PDF",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (paragraphs == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Загружаем параграфы…",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (mode == "paragraphs" && paragraphs != null) {
+                // Быстрый диапазон
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = quickFrom,
+                        onValueChange = { quickFrom = it.filter { ch -> ch.isDigit() }.take(4) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(text = "От §") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = quickTo,
+                        onValueChange = { quickTo = it.filter { ch -> ch.isDigit() }.take(4) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(text = "До §") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Button(
+                        onClick = {
+                            val from = quickFromNum ?: return@Button
+                            val to = quickToNum ?: return@Button
+                            if (from > to) return@Button
+                            selectedNumbers =
+                                rows.filter { it.number in from..to }.map { it.number }.toSet()
+                            contentExpanded = true
+                        },
+                        enabled = quickFromNum != null && quickToNum != null,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(text = "Выделить", fontSize = 14.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Содержание с галочками
+                OutlinedCard(shape = RoundedCornerShape(14.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { contentExpanded = !contentExpanded },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Содержание (" + rows.size + ")",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = if (contentExpanded) "скрыть ▲" else "показать ▼",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (contentExpanded) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(
+                                modifier = Modifier
+                                    .heightIn(max = 300.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                rows.forEach { row ->
+                                    val checked = row.number in selectedNumbers
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selectedNumbers =
+                                                    if (checked) {
+                                                        selectedNumbers - row.number
+                                                    } else {
+                                                        selectedNumbers + row.number
+                                                    }
+                                            },
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(checked = checked, onCheckedChange = {
+                                            selectedNumbers =
+                                                if (it) {
+                                                    selectedNumbers + row.number
+                                                } else {
+                                                    selectedNumbers - row.number
+                                                }
+                                        })
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (row.title.isBlank()) {
+                                                    "§ ${row.number} без названия"
+                                                } else {
+                                                    "§ ${row.number}. ${row.title}"
+                                                },
+                                                fontSize = 13.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (isPdf) {
+                                                Text(
+                                                    text = if (row.startPage == row.endPage) {
+                                                        "стр. ${row.startPage}"
+                                                    } else {
+                                                        "стр. ${row.startPage}–${row.endPage}"
+                                                    },
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (selectedNumbers.isEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Отметьте параграфы галочками (или выделите диапазоном выше)",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (mode == "pages" && paragraphs != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = pageFromText,
+                        onValueChange = { pageFromText = it.filter { ch -> ch.isDigit() }.take(4) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(text = "От стр.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = pageToText,
+                        onValueChange = { pageToText = it.filter { ch -> ch.isDigit() }.take(4) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(text = "До стр.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+                if (pagePreview.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = pagePreview,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Параметры генерации
             Text(
-                text = "Сложность",
+                text = "Параметры генерации",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { if (count > 1) countText = (count - 1).toString() },
+                    enabled = count > 1,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = "−", fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = countText.ifBlank { "0" },
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.width(48.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Button(
+                    onClick = { if (count < 50) countText = (count + 1).toString() },
+                    enabled = count < 50,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = "+", fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "вопросов (1–50)",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
                     "easy" to "Лёгкий",
@@ -398,118 +685,92 @@ fun TextbookRangeScreen(
                     )
                 }
             }
+
             Spacer(modifier = Modifier.height(20.dp))
+
             Button(
                 onClick = {
                     if (generating) return@Button
                     val s = settings
-                    val from = fromText.toIntOrNull()
-                    val to = toText.toIntOrNull()
-                    val count = (countText.toIntOrNull() ?: 0)
-                    when {
-                        from == null || to == null || from < 1 || to < from ->
-                            android.widget.Toast.makeText(
-                                context,
-                                "Укажите диапазон: «От §» меньше или равно «До §»",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        count < 1 || count > 50 ->
-                            android.widget.Toast.makeText(
-                                context,
-                                "Количество вопросов — от 1 до 50",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        difficulties.isEmpty() ->
-                            android.widget.Toast.makeText(
-                                context,
-                                "Выберите хотя бы одну сложность",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        s == null || s.apiKey.isBlank() ->
-                            android.widget.Toast.makeText(
-                                context,
-                                "Сначала добавьте ключ OpenRouter в Настройках",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        else -> {
-                            generating = true
-                            statusText = null
-                            val fromFinal = from
-                            val toFinal = to
-                            val countFinal = count
-                            val difficultiesFinal = difficulties
-                            val topic = "${book?.name ?: "Учебник"} § $fromFinal-$toFinal"
-                            scope.launch {
-                                val textResult = TextbookRepository.fetchParagraphText(
-                                    textbookId, fromFinal, toFinal
-                                )
-                                textResult.fold(
-                                    onFailure = { e ->
-                                        generating = false
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            e.message ?: "Не удалось получить параграфы",
-                                            android.widget.Toast.LENGTH_LONG
-                                        ).show()
-                                    },
-                                    onSuccess = { fullText ->
-                                        val capped =
-                                            if (fullText.length > 20000) {
-                                                fullText.take(20000) + "\n…(текст обрезан)"
-                                            } else {
-                                                fullText
-                                            }
-                                        val outcome = AiQuestionGenerator.generateFromPdf(
-                                            apiKey = s.apiKey,
-                                            settings = s,
-                                            topic = topic,
-                                            count = countFinal,
-                                            difficulties = difficultiesFinal,
-                                            textbookText = capped
-                                        )
-                                        generating = false
-                                        if (outcome.questions.isEmpty()) {
-                                            statusText = outcome.report.ifBlank {
-                                                "Не удалось сгенерировать вопросы"
-                                            }
-                                        } else {
-                                            val candidates = outcome.questions.mapIndexed { index, q ->
-                                                Question(
-                                                    text = q.text.trim(),
-                                                    optionA = q.options.getOrElse(0) { "" }.trim(),
-                                                    optionB = q.options.getOrElse(1) { "" }.trim(),
-                                                    optionC = q.options.getOrElse(2) { "" }.trim(),
-                                                    optionD = q.options.getOrElse(3) { "" }.trim(),
-                                                    correctIndex = q.correct,
-                                                    difficulty = q.difficulty,
-                                                    tricky = false,
-                                                    createdAt = System.currentTimeMillis() - index,
-                                                    source = "pdf",
-                                                    topic = topic
-                                                )
-                                            }
-                                            val (fresh, dups) = db.questionDao().insertUnique(candidates)
-                                            outcome.modelUsed?.let {
-                                                app.settingsRepository.saveLastWorking(it)
-                                            }
-                                            val message = when {
-                                                fresh == 0 -> "Все сгенерированные вопросы уже есть в банке"
-                                                dups > 0 -> "Добавлено $fresh вопросов (отброшено $dups дублей)"
-                                                else -> "Добавлено $fresh вопросов"
-                                            }
-                                            android.widget.Toast.makeText(
-                                                context,
-                                                message,
-                                                android.widget.Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    }
+                    if (s == null || s.apiKey.isBlank()) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Сначала добавьте ключ OpenRouter в Настройках",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        return@Button
+                    }
+                    if (difficulties.isEmpty()) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Выберите хотя бы одну сложность",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        return@Button
+                    }
+                    val countFinal = count
+                    val difficultiesFinal = difficulties
+                    val topicFinal = finalTopic
+                    generating = true
+                    statusText = null
+                    scope.launch {
+                        val generationText = TextbookRepository.buildGenerationText(
+                            rows,
+                            selectedNumbers = if (mode == "paragraphs") selectedNumbers else null,
+                            pageFrom = if (mode == "pages") pageFrom else null,
+                            pageTo = if (mode == "pages") pageTo else null
+                        )
+                        val capped =
+                            if (generationText.length > 20000) {
+                                generationText.take(20000) + "\n…(текст обрезан)"
+                            } else {
+                                generationText
+                            }
+                        val outcome = AiQuestionGenerator.generateFromPdf(
+                            apiKey = s.apiKey,
+                            settings = s,
+                            topic = topicFinal,
+                            count = countFinal,
+                            difficulties = difficultiesFinal,
+                            textbookText = capped
+                        )
+                        generating = false
+                        if (outcome.questions.isEmpty()) {
+                            statusText = outcome.report.ifBlank {
+                                "Не удалось сгенерировать вопросы"
+                            }
+                        } else {
+                            val candidates = outcome.questions.mapIndexed { index, q ->
+                                Question(
+                                    text = q.text.trim(),
+                                    optionA = q.options.getOrElse(0) { "" }.trim(),
+                                    optionB = q.options.getOrElse(1) { "" }.trim(),
+                                    optionC = q.options.getOrElse(2) { "" }.trim(),
+                                    optionD = q.options.getOrElse(3) { "" }.trim(),
+                                    correctIndex = q.correct,
+                                    difficulty = q.difficulty,
+                                    tricky = false,
+                                    createdAt = System.currentTimeMillis() - index,
+                                    source = "pdf",
+                                    topic = topicFinal
                                 )
                             }
+                            val (fresh, dups) = db.questionDao().insertUnique(candidates)
+                            outcome.modelUsed?.let { app.settingsRepository.saveLastWorking(it) }
+                            val message = when {
+                                fresh == 0 -> "Все сгенерированные вопросы уже есть в банке"
+                                dups > 0 -> "Добавлено $fresh вопросов (отброшено $dups дублей)"
+                                else -> "Добавлено $fresh вопросов"
+                            }
+                            android.widget.Toast.makeText(
+                                context,
+                                message,
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
                         }
                     }
                 },
-                enabled = !generating,
+                enabled = canGenerate && paragraphs != null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -531,7 +792,7 @@ fun TextbookRangeScreen(
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Загружаем параграфы и обращаемся к ИИ — это может занять минуту",
+                        text = "Обращаемся к ИИ — это может занять минуту",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

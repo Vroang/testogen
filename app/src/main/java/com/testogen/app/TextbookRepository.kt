@@ -19,7 +19,9 @@ import java.util.UUID
 // Схема таблиц Supabase (проверена по живому REST API):
 // textbooks(id uuid, user_id uuid, name, format, paragraph_count,
 //           storage_path, uploaded_at timestamptz)
-// paragraphs(id uuid, textbook_id uuid, number int, text text)
+// paragraphs(id uuid, textbook_id uuid, number int, text text,
+//            title text, start_page int, end_page int)
+// (title/start_page/end_page добавлены в шаге 29 — SQL у пользователя)
 
 @Serializable
 private data class TextbookRow(
@@ -36,17 +38,32 @@ private data class TextbookRow(
 private data class ParagraphInsert(
     @SerialName("textbook_id") val textbookId: String,
     val number: Int,
+    val title: String,
+    @SerialName("start_page") val startPage: Int,
+    @SerialName("end_page") val endPage: Int,
     val text: String
 )
 
 @Serializable
 data class ParagraphRow(
     val number: Int,
-    val text: String
+    val title: String = "",
+    @SerialName("start_page") val startPage: Int = 1,
+    @SerialName("end_page") val endPage: Int = 1,
+    val text: String = ""
 )
 
 // Файл больше 50 МБ — mb: размер в МБ (округлён вверх) для диалога.
 class OversizeException(val mb: Int) : Exception("Файл слишком большой")
+
+// Шаг 29: параграф с названием и диапазоном страниц.
+data class ParsedParagraph(
+    val number: Int,
+    val title: String,
+    val text: String,
+    val startPage: Int,
+    val endPage: Int
+)
 
 object TextbookRepository {
 
@@ -82,18 +99,22 @@ object TextbookRepository {
                 val bytes = context.contentResolver.openInputStream(uri)?.use {
                     it.readBytes()
                 } ?: throw Exception("Не удалось открыть файл")
-                val rawText = when (format) {
-                    "pdf" -> extractPdfText(bytes)
-                    "docx" -> extractDocxText(bytes)
-                    else -> String(bytes, Charsets.UTF_8)
-                }.replace("\r\n", "\n")
+                // Шаг 29: PDF читается постранично — это даёт номера
+                // страниц для параграфов. Для DOCX/TXT страниц нет.
+                val pageTexts: List<Pair<Int, String>> = when (format) {
+                    "pdf" -> extractPdfPages(bytes)
+                    "docx" -> listOf(1 to extractDocxText(bytes))
+                    else -> listOf(1 to String(bytes, Charsets.UTF_8))
+                }
+                val rawText = pageTexts.joinToString("\n") { it.second }
+                    .replace("\r\n", "\n")
                     .replace('\r', '\n')
                     .replace(Regex("\n{3,}"), "\n\n")
                     .trim()
                 if (rawText.isBlank()) {
                     throw Exception("Текст не извлечён (возможно, файл — сканы картинок)")
                 }
-                val paragraphs = splitParagraphs(rawText)
+                val paragraphs = splitParagraphs(pageTexts)
                 if (paragraphs.isEmpty()) {
                     throw Exception("Не найдено параграфов с маркером § (нужны заголовки вида «§ 12»)")
                 }
@@ -102,8 +123,6 @@ object TextbookRepository {
                     ?: throw Exception("Не удалось определить пользователя — войдите заново")
                 val bookId = UUID.randomUUID().toString()
                 // Шаг 28.3: ключ в бакете — только ASCII «<uuid>.<ext>».
-                // Кириллица/пробелы в имени файла давали Storage-ошибку
-                // InvalidKey; бакет "textbooks" указан через from(...).
                 val storagePath = "$bookId.$format"
                 val uploadedAtIso = java.time.Instant.now().toString()
 
@@ -121,7 +140,16 @@ object TextbookRepository {
                 )
                 paragraphs.chunked(100).forEach { batch ->
                     SupabaseClient.client.postgrest.from("paragraphs").insert(
-                        batch.map { ParagraphInsert(bookId, it.first, it.second) }
+                        batch.map {
+                            ParagraphInsert(
+                                textbookId = bookId,
+                                number = it.number,
+                                title = it.title,
+                                startPage = it.startPage,
+                                endPage = it.endPage,
+                                text = it.text
+                            )
+                        }
                     )
                 }
 
@@ -165,29 +193,63 @@ object TextbookRepository {
             }
         }
 
-    suspend fun fetchParagraphText(textbookId: String, from: Int, to: Int): Result<String> =
+    /** Все параграфы учебника по возрастанию номеров. */
+    suspend fun fetchParagraphs(textbookId: String): Result<List<ParagraphRow>> =
         withContext(Dispatchers.IO) {
             try {
                 if (!AuthManager.requireSignedIn()) {
                     throw Exception("Войдите в аккаунт")
                 }
                 val rows = SupabaseClient.client.postgrest.from("paragraphs").select {
-                    filter {
-                        eq("textbook_id", textbookId)
-                        gte("number", from)
-                        lte("number", to)
-                    }
+                    filter { eq("textbook_id", textbookId) }
                     order("number", Order.ASCENDING)
                 }.decodeList<ParagraphRow>()
-                if (rows.isEmpty()) {
-                    return@withContext Result.failure(Exception("В этом диапазоне нет параграфов"))
-                }
-                val joined = rows.joinToString("\n\n") { "§ ${it.number}\n${it.text}" }
-                Result.success(joined)
+                Result.success(rows)
             } catch (e: Exception) {
                 Result.failure(mapError(e))
             }
         }
+
+    /**
+     * Шаг 29: собрать текст для ИИ.
+     * selectedNumbers != null — режим «по параграфам» (берём их целиком);
+     * иначе — режим «по страницам»: параграфы, пересекающие диапазон,
+     * внутри параграфа текст срезается пропорционально страницам.
+     */
+    fun buildGenerationText(
+        rows: List<ParagraphRow>,
+        selectedNumbers: Set<Int>? = null,
+        pageFrom: Int? = null,
+        pageTo: Int? = null
+    ): String {
+        val chosen = if (selectedNumbers != null) {
+            rows.filter { it.number in selectedNumbers }
+        } else {
+            val from = pageFrom ?: 1
+            val to = pageTo ?: Int.MAX_VALUE
+            rows.filter { it.startPage <= to && it.endPage >= from }
+        }
+        return chosen.joinToString("\n\n") { row ->
+            val head = buildString {
+                append("§ ").append(row.number)
+                if (row.title.isNotBlank()) append(". ").append(row.title)
+            }
+            val body = if (pageFrom == null || pageTo == null ||
+                (row.startPage >= pageFrom && row.endPage <= pageTo)
+            ) {
+                row.text
+            } else {
+                // Приближённый срез: параграф длиннее диапазона страниц.
+                val span = (row.endPage - row.startPage + 1).coerceAtLeast(1)
+                val startFrac = (pageFrom - row.startPage).coerceAtLeast(0).toFloat() / span
+                val endFrac = (pageTo - row.startPage + 1).coerceIn(0, span).toFloat() / span
+                val fromIndex = (row.text.length * startFrac).toInt().coerceIn(0, row.text.length)
+                val toIndex = (row.text.length * endFrac).toInt().coerceIn(0, row.text.length)
+                row.text.substring(fromIndex, toIndex).trim().ifBlank { row.text }
+            }
+            "$head\n$body"
+        }
+    }
 
     private fun mapError(e: Exception): Exception {
         val raw = e.message ?: ""
@@ -203,27 +265,68 @@ object TextbookRepository {
         }
     }
 
-    /** Параграфы по маркерам «§ N»; возвращает пары (номер, текст). */
-    fun splitParagraphs(text: String): List<Pair<Int, String>> {
+    /** Параграфы по маркерам «§ N» с названием и страницами. */
+    fun splitParagraphs(pages: List<Pair<Int, String>>): List<ParsedParagraph> {
+        if (pages.isEmpty()) return emptyList()
+        val combined = StringBuilder()
+        val pageOffsets = mutableListOf<Pair<Int, Int>>() // страница → смещение
+        pages.forEach { (number, text) ->
+            pageOffsets.add(number to combined.length)
+            combined.append(text)
+            combined.append('\n')
+        }
+        val full = combined.toString()
+        fun pageAt(index: Int): Int {
+            var page = pageOffsets.first().first
+            for ((number, offset) in pageOffsets) {
+                if (offset <= index) page = number else break
+            }
+            return page
+        }
         val marker = Regex("§\\s*(\\d+)")
-        val matches = marker.findAll(text).toList()
+        val matches = marker.findAll(full).toList()
         if (matches.isEmpty()) return emptyList()
-        val result = mutableListOf<Pair<Int, String>>()
+        val result = mutableListOf<ParsedParagraph>()
         for (i in matches.indices) {
             val number = matches[i].groupValues[1].toIntOrNull() ?: continue
             val start = matches[i].range.last + 1
-            val end = if (i + 1 < matches.size) matches[i + 1].range.first else text.length
-            val content = text.substring(start, end).trim()
-            if (content.isNotBlank()) {
-                result.add(number to content)
-            }
+            val end = if (i + 1 < matches.size) matches[i + 1].range.first else full.length
+            val content = full.substring(start, end).trim()
+            if (content.isBlank()) continue
+            val startPage = pageAt(matches[i].range.first)
+            val endPage = pageAt((end - 1).coerceAtLeast(start))
+            result.add(
+                ParsedParagraph(
+                    number = number,
+                    title = extractTitle(content),
+                    text = content,
+                    startPage = startPage,
+                    endPage = endPage
+                )
+            )
         }
         return result
     }
 
-    private fun extractPdfText(bytes: ByteArray): String =
+    /** Название параграфа — первая строка после «§ N», до 100 символов. */
+    private fun extractTitle(content: String): String =
+        content.lineSequence().firstOrNull { it.isNotBlank() }
+            .orEmpty()
+            .replace(Regex("^\\d+\\s*[.\\-–—)]?\\s*"), "")
+            .trim()
+            .take(100)
+
+    /** PDF постранично: список (номер страницы, текст страницы). */
+    private fun extractPdfPages(bytes: ByteArray): List<Pair<Int, String>> =
         PDDocument.load(ByteArrayInputStream(bytes)).use { doc ->
-            PDFTextStripper().getText(doc)
+            val stripper = PDFTextStripper()
+            val pages = mutableListOf<Pair<Int, String>>()
+            for (page in 1..doc.numberOfPages) {
+                stripper.startPage = page
+                stripper.endPage = page
+                pages.add(page to stripper.getText(doc))
+            }
+            pages
         }
 
     private fun extractDocxText(bytes: ByteArray): String {
