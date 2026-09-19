@@ -127,6 +127,9 @@ interface ReplacementReasonDao {
 
     @Query("DELETE FROM replacement_reasons")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM replacement_reasons WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }
 
 // Шаг 25: журнал обращений к ИИ (диагностика каскада моделей).
@@ -182,6 +185,9 @@ interface TextbookDao {
 
     @Query("SELECT * FROM textbooks ORDER BY uploadedAt DESC")
     fun getAll(): Flow<List<Textbook>>
+
+    @Query("SELECT * FROM textbooks ORDER BY uploadedAt DESC")
+    suspend fun getAllOnce(): List<Textbook>
 
     @Query("SELECT * FROM textbooks WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): Textbook?

@@ -24,8 +24,9 @@ import java.util.UUID
 // отправка в Supabase идёт фоном и переживает отсутствие сети
 // (syncStatus = pending_upload, очередь pending_deletes).
 
+// Шаг 32: DTO открыт для CloudSyncRepository (detect/apply).
 @Serializable
-private data class TextbookRow(
+data class TextbookRow(
     val id: String,
     @SerialName("user_id") val userId: String,
     val name: String,
@@ -322,65 +323,70 @@ object TextbookRepository {
                 if (!AuthManager.requireSignedIn()) {
                     throw Exception("Войдите в аккаунт")
                 }
-                val user = AuthManager.currentUserAsync() ?: throw Exception("Войдите в аккаунт")
                 val database = db(context)
                 val cloudRows = SupabaseClient.client.postgrest.from("textbooks")
                     .select { }
                     .decodeList<TextbookRow>()
                 var restored = 0
                 for (row in cloudRows) {
-                    if (database.textbookDao().getById(row.id) != null) continue
-                    val paragraphs = SupabaseClient.client.postgrest.from("paragraphs").select {
-                        filter { eq("textbook_id", row.id) }
-                        order("number", Order.ASCENDING)
-                    }.decodeList<ParagraphRow>()
-                    val storagePath = row.storagePath
-                    val ext = storagePath.substringAfterLast('.', "pdf")
-                    val localFile = File(
-                        File(context.filesDir, "textbooks").apply { if (!exists()) mkdirs() },
-                        "${row.id}.$ext"
-                    )
-                    runCatching {
-                        val bytes = SupabaseClient.client.storage.from("textbooks")
-                            .downloadAuthenticated(storagePath)
-                        localFile.writeBytes(bytes)
-                    }
-                    val uploadedAt = runCatching {
-                        java.time.Instant.parse(row.uploadedAt).toEpochMilli()
-                    }.getOrDefault(System.currentTimeMillis())
-                    database.textbookDao().insert(
-                        Textbook(
-                            id = row.id,
-                            name = row.name,
-                            format = row.format,
-                            paragraphCount = paragraphs.size,
-                            uploadedAt = uploadedAt,
-                            storagePath = storagePath,
-                            localCachePath = localFile.absolutePath,
-                            syncStatus = "synced",
-                            userId = row.userId.ifBlank { user.id }
-                        )
-                    )
-                    database.paragraphDao().insertAll(
-                        paragraphs.map {
-                            Paragraph(
-                                id = UUID.randomUUID().toString(),
-                                textbookId = row.id,
-                                number = it.number,
-                                title = it.title,
-                                text = it.text,
-                                startPage = it.startPage,
-                                endPage = it.endPage
-                            )
-                        }
-                    )
-                    restored++
+                    if (restoreCloudTextbook(context, row)) restored++
                 }
                 Result.success(restored)
             } catch (e: Exception) {
                 Result.failure(mapError(e))
             }
         }
+
+    /** Шаг 32: восстановить один учебник (метаданные + параграфы + файл). */
+    suspend fun restoreCloudTextbook(context: Context, row: TextbookRow): Boolean {
+        val database = db(context)
+        if (database.textbookDao().getById(row.id) != null) return false
+        val user = AuthManager.currentUserAsync()
+        val paragraphs = SupabaseClient.client.postgrest.from("paragraphs").select {
+            filter { eq("textbook_id", row.id) }
+            order("number", Order.ASCENDING)
+        }.decodeList<ParagraphRow>()
+        val ext = row.storagePath.substringAfterLast('.', "pdf")
+        val localFile = File(
+            File(context.filesDir, "textbooks").apply { if (!exists()) mkdirs() },
+            "${row.id}.$ext"
+        )
+        runCatching {
+            val bytes = SupabaseClient.client.storage.from("textbooks")
+                .downloadAuthenticated(row.storagePath)
+            localFile.writeBytes(bytes)
+        }
+        val uploadedAt = runCatching {
+            java.time.Instant.parse(row.uploadedAt).toEpochMilli()
+        }.getOrDefault(System.currentTimeMillis())
+        database.textbookDao().insert(
+            Textbook(
+                id = row.id,
+                name = row.name,
+                format = row.format,
+                paragraphCount = paragraphs.size,
+                uploadedAt = uploadedAt,
+                storagePath = row.storagePath,
+                localCachePath = localFile.absolutePath,
+                syncStatus = "synced",
+                userId = row.userId.ifBlank { user?.id.orEmpty() }
+            )
+        )
+        database.paragraphDao().insertAll(
+            paragraphs.map {
+                Paragraph(
+                    id = UUID.randomUUID().toString(),
+                    textbookId = row.id,
+                    number = it.number,
+                    title = it.title,
+                    text = it.text,
+                    startPage = it.startPage,
+                    endPage = it.endPage
+                )
+            }
+        )
+        return true
+    }
 
     /**
      * Шаг 29: собрать текст для ИИ (галочки по параграфам или

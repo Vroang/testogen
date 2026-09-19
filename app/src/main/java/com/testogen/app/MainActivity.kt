@@ -133,6 +133,7 @@ import androidx.core.content.FileProvider
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -194,12 +195,29 @@ class MainActivity : ComponentActivity() {
     companion object {
         // Проверка обновлений — один раз за запуск приложения
         var updateCheckStarted = false
+
+        // Шаг 32: onResume-синхронизация не чаще раза в 5 минут
+        var lastResumeSyncAt = 0L
     }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             TestoGenTheme {
                 AppNavigation()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Шаг 32: при возврате из фона — синхронизация с подтверждением.
+        val now = System.currentTimeMillis()
+        if (now - lastResumeSyncAt > 5 * 60_000L) {
+            lastResumeSyncAt = now
+            val app = applicationContext
+            CoroutineScope(Dispatchers.Main).launch {
+                CloudSyncRepository.syncWithCloud(app, showPrompt = true)
             }
         }
     }
@@ -217,13 +235,12 @@ fun AppNavigation() {
         val signedIn = AuthManager.requireSignedIn()
         startDestination = if (signedIn) "main" else "login"
         if (signedIn) {
-            // Шаг 30/31: догоняем облако в фоне (учебники + вопросы + причины).
+            // Шаг 30/31/32: push локального + обратная синхронизация
+            // с подтверждением (диалог появится сам при изменениях).
+            CloudSyncState.lastDeclinedHash =
+                (appContext as TestoGenApp).settingsRepository.getPendingChangesHash()
             navScope.launch {
-                TextbookRepository.syncAllPending(appContext)
-                QuestionSyncRepository.syncAll(appContext)
-                // Шаг 31.1: автоподтягивание изменений из веб-версии
-                // (не чаще раза в 5 минут).
-                QuestionSyncRepository.pullAllIfStale(appContext)
+                CloudSyncRepository.syncWithCloud(appContext, showPrompt = true)
             }
         }
     }
@@ -238,6 +255,39 @@ fun AppNavigation() {
         }
         return
     }
+    var changesApplying by remember { mutableStateOf(false) }
+
+    fun startApplyChanges(onDone: () -> Unit) {
+        val changes = CloudSyncState.pendingChanges
+        if (changes == null) {
+            onDone()
+            return
+        }
+        changesApplying = true
+        navScope.launch {
+            val result = CloudSyncRepository.applyCloudChanges(appContext, changes)
+            changesApplying = false
+            result.fold(
+                onSuccess = { counts ->
+                    CloudSyncState.pendingChanges = null
+                    Toast.makeText(
+                        appContext,
+                        "Синхронизировано: +${counts.first} ~${counts.second} −${counts.third}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                },
+                onFailure = { e ->
+                    Toast.makeText(
+                        appContext,
+                        "Не удалось применить: ${e.message ?: "ошибка"}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
+            onDone()
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = destination,
@@ -341,6 +391,43 @@ fun AppNavigation() {
                 onBack = { navController.popBackStack() }
             )
         }
+        composable("changes_detail") {
+            val changes = CloudSyncState.pendingChanges
+            if (changes == null) {
+                navController.popBackStack()
+            } else {
+                ChangesDetailScreen(
+                    changes = changes,
+                    applying = changesApplying,
+                    onBack = { navController.popBackStack() },
+                    onApply = { startApplyChanges { navController.popBackStack() } }
+                )
+            }
+        }
+    }
+
+    // Шаг 32: диалог подтверждения изменений из веб-версии.
+    CloudSyncState.pendingChanges?.let { changes ->
+        CloudChangesDialog(
+            changes = changes,
+            applying = changesApplying,
+            onCancel = {
+                val declined = changes
+                CloudSyncState.pendingChanges = null
+                navScope.launch {
+                    val hash = declined.hashCode().toString()
+                    (appContext as TestoGenApp).settingsRepository.setPendingChangesHash(hash)
+                    CloudSyncState.lastDeclinedHash = hash
+                    Toast.makeText(
+                        appContext,
+                        "Изменения отложены. Можно применить вручную в Настройках",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            },
+            onDetails = { navController.navigate("changes_detail") },
+            onApply = { startApplyChanges { } }
+        )
     }
 }
 
@@ -1816,6 +1903,10 @@ fun QuestionBankScreen(
                 QuestionSyncRepository.syncAll(context.applicationContext)
             }
         }
+        if (activeTab == "manual") {
+            // Шаг 32: обратная синхронизация с подтверждением.
+            scope.launch { CloudSyncRepository.syncWithCloud(context) }
+        }
     }
 
     var topicFilter by remember { mutableStateOf<String?>(null) }
@@ -1972,6 +2063,37 @@ fun QuestionBankScreen(
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
+                    }
+                    if (CloudSyncState.isSyncing) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else if (CloudSyncState.lastDeclinedHash.isNotEmpty()) {
+                        // Шаг 32: есть отложенные изменения — можно открыть снова.
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable {
+                                scope.launch {
+                                    CloudSyncRepository.syncWithCloud(
+                                        context,
+                                        showPrompt = true,
+                                        ignoreDeclinedHash = true
+                                    )
+                                }
+                            }
+                        ) {
+                            Text(
+                                text = "!",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 

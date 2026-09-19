@@ -631,15 +631,82 @@ fun SettingsScreen(
             SettingsCard {
                 SectionLabel("Синхронизация с облаком")
                 Spacer(modifier = Modifier.height(6.dp))
+                // Шаг 32: время последней синхронизации + проверка сейчас
+                val lastSync = remember { mutableStateOf(0L) }
+                LaunchedEffect(Unit) {
+                    lastSync.value = repo.getLastSyncTimestamp()
+                    CloudSyncState.lastDeclinedHash = repo.getPendingChangesHash()
+                }
+                val lastSyncText = if (lastSync.value == 0L) {
+                    "Ещё не синхронизировалось"
+                } else {
+                    val minutes = (System.currentTimeMillis() - lastSync.value) / 60000
+                    when {
+                        minutes < 1 -> "Последняя синхронизация: только что"
+                        minutes < 60 -> "Последняя синхронизация: $minutes мин назад"
+                        else -> "Последняя синхронизация: ${minutes / 60} ч назад"
+                    }
+                }
                 Text(
-                    text = if (pendingTotal == 0) {
-                        "Всё синхронизировано"
-                    } else {
-                        "Синхронизация с облаком: $pendingTotal в очереди"
-                    },
+                    text = lastSyncText,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (pendingTotal > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Синхронизация с облаком: $pendingTotal в очереди",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                var checking by remember { mutableStateOf(false) }
+                Button(
+                    onClick = {
+                        checking = true
+                        scope.launch {
+                            CloudSyncRepository.syncWithCloud(context, showPrompt = true)
+                            checking = false
+                        }
+                    },
+                    enabled = !checking && !restoring,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text(
+                        text = if (checking) "Проверяем…" else "Проверить сейчас",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (CloudSyncState.lastDeclinedHash.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                CloudSyncRepository.syncWithCloud(
+                                    context,
+                                    showPrompt = true,
+                                    ignoreDeclinedHash = true
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Применить отложенные изменения (отменено ранее)",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 var confirmRestore by remember { mutableStateOf(false) }
                 Button(

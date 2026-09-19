@@ -13,8 +13,9 @@ import java.util.UUID
 // Вопросы/причины сохраняются в Room сразу; в Supabase уходят
 // фоном; при отсутствии сети — позже (syncStatus/pending_deletes).
 
+// Шаг 32: DTO открыты для CloudSyncRepository (detect/apply).
 @Serializable
-private data class QuestionRow(
+data class QuestionRow(
     val id: String,
     @SerialName("user_id") val userId: String = "",
     val text: String = "",
@@ -31,7 +32,7 @@ private data class QuestionRow(
 )
 
 @Serializable
-private data class ReasonRow(
+data class ReasonRow(
     val id: String,
     @SerialName("user_id") val userId: String = "",
     @SerialName("replaced_question_text") val replacedQuestionText: String? = null,
@@ -40,9 +41,6 @@ private data class ReasonRow(
 )
 
 object QuestionSyncRepository {
-
-    @Volatile
-    private var lastAutoPullAt = 0L
 
     private fun db(context: Context): AppDatabase =
         (context.applicationContext as TestoGenApp).database
@@ -310,15 +308,8 @@ object QuestionSyncRepository {
         return Result.success(Triple(restoredTextbooks, pulled.first, pulled.second))
     }
 
-    /** Шаг 31.1: автоподтягивание при старте — не чаще раза в 5 минут. */
-    suspend fun pullAllIfStale(context: Context) {
-        val now = System.currentTimeMillis()
-        if (now - lastAutoPullAt < 5 * 60_000L) return
-        lastAutoPullAt = now
-        runCatching { pullQuestionsAndReasons(context) }
-    }
-
-    private fun parseInstant(value: String?): Long =
+    /** Шаг 32: разбор ISO-времени Supabase в epoch-миллисекунды. */
+    fun parseInstant(value: String?): Long =
         runCatching { java.time.Instant.parse(value).toEpochMilli() }
             .getOrDefault(System.currentTimeMillis())
 

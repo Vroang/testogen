@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
@@ -45,6 +47,9 @@ class SettingsRepository(private val context: Context) {
         private val KEY_AI_AVOID = stringPreferencesKey("ai_avoid_text")
         private val KEY_AI_SUBJECTS = stringPreferencesKey("ai_subjects_text")
         private val KEY_REPLACEMENTS_SINCE = intPreferencesKey("replacements_since_squeeze")
+        // Шаг 32: обратная синхронизация с подтверждением
+        private val KEY_LAST_SYNC = longPreferencesKey("last_sync_timestamp")
+        private val KEY_PENDING_HASH = stringPreferencesKey("pending_changes_hash")
 
         const val AUTO_MODEL = "openrouter/auto"
         const val DEFAULT_MODEL = AUTO_MODEL
@@ -135,5 +140,20 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun saveCascadePaid(v: String) {
         context.dataStore.edit { it[KEY_CASCADE_PAID] = v }
+    }
+
+    // Шаг 32: метки обратной синхронизации
+    suspend fun getLastSyncTimestamp(): Long =
+        context.dataStore.data.map { it[KEY_LAST_SYNC] ?: 0L }.first()
+
+    suspend fun setLastSyncTimestamp(v: Long) {
+        context.dataStore.edit { it[KEY_LAST_SYNC] = v }
+    }
+
+    suspend fun getPendingChangesHash(): String =
+        context.dataStore.data.map { it[KEY_PENDING_HASH] ?: "" }.first()
+
+    suspend fun setPendingChangesHash(v: String) {
+        context.dataStore.edit { it[KEY_PENDING_HASH] = v }
     }
 }
