@@ -16,30 +16,33 @@ import java.util.UUID
 @Serializable
 private data class QuestionRow(
     val id: String,
-    @SerialName("user_id") val userId: String,
-    val text: String,
-    @SerialName("option_a") val optionA: String = "",
-    @SerialName("option_b") val optionB: String = "",
-    @SerialName("option_c") val optionC: String = "",
-    @SerialName("option_d") val optionD: String = "",
-    @SerialName("correct_index") val correctIndex: Int = 0,
-    val difficulty: String = "medium",
+    @SerialName("user_id") val userId: String = "",
+    val text: String = "",
+    @SerialName("option_a") val optionA: String? = null,
+    @SerialName("option_b") val optionB: String? = null,
+    @SerialName("option_c") val optionC: String? = null,
+    @SerialName("option_d") val optionD: String? = null,
+    @SerialName("correct_index") val correctIndex: Int? = 0,
+    val difficulty: String? = "medium",
     val tricky: Boolean = false,
-    val topic: String = "",
-    val source: String = "manual",
-    @SerialName("created_at") val createdAt: String
+    val topic: String? = "",
+    val source: String? = "manual",
+    @SerialName("created_at") val createdAt: String? = null
 )
 
 @Serializable
 private data class ReasonRow(
     val id: String,
-    @SerialName("user_id") val userId: String,
-    @SerialName("replaced_question_text") val replacedQuestionText: String = "",
-    val reason: String,
-    @SerialName("created_at") val createdAt: String
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("replaced_question_text") val replacedQuestionText: String? = null,
+    val reason: String = "",
+    @SerialName("created_at") val createdAt: String? = null
 )
 
 object QuestionSyncRepository {
+
+    @Volatile
+    private var lastAutoPullAt = 0L
 
     private fun db(context: Context): AppDatabase =
         (context.applicationContext as TestoGenApp).database
@@ -203,5 +206,130 @@ object QuestionSyncRepository {
         }
         database.replacementReasonDao().deleteAll()
         syncPendingDeletes(context)
+    }
+
+    /**
+     * Шаг 31.1: подтянуть вопросы и причины из облака (например,
+     * созданные в веб-версии). Без дублей: сначала по cloudId,
+     * затем по совпадению текста (связываем с локальной записью).
+     * Возвращает Pair(новых вопросов, новых причин).
+     */
+    suspend fun pullQuestionsAndReasons(context: Context): Result<Pair<Int, Int>> =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!AuthManager.requireSignedIn()) {
+                    throw Exception("Войдите в аккаунт")
+                }
+                val database = db(context)
+                var newQuestions = 0
+                var newReasons = 0
+
+                val localQuestions = database.questionDao().getAllOnce()
+                val questionsByCloudId =
+                    localQuestions.filter { it.cloudId != null }.associateBy { it.cloudId }
+                val cloudQuestions = SupabaseClient.client.postgrest.from("questions")
+                    .select { }
+                    .decodeList<QuestionRow>()
+                for (row in cloudQuestions) {
+                    if (questionsByCloudId.containsKey(row.id)) continue
+                    val textMatch = localQuestions.firstOrNull {
+                        it.text == row.text && it.correctIndex == (row.correctIndex ?: 0)
+                    }
+                    if (textMatch != null) {
+                        // Уже есть локально (возможно, ещё не отправлен) —
+                        // связываем с облаком, чтобы не создавать дубль.
+                        if (textMatch.cloudId == null) {
+                            database.questionDao().update(textMatch.copy(cloudId = row.id))
+                        }
+                        continue
+                    }
+                    database.questionDao().insert(
+                        Question(
+                            text = row.text,
+                            optionA = row.optionA.orEmpty(),
+                            optionB = row.optionB.orEmpty(),
+                            optionC = row.optionC.orEmpty(),
+                            optionD = row.optionD.orEmpty(),
+                            correctIndex = row.correctIndex ?: 0,
+                            difficulty = row.difficulty?.ifBlank { "medium" } ?: "medium",
+                            tricky = row.tricky,
+                            createdAt = parseInstant(row.createdAt),
+                            source = row.source ?: "manual",
+                            topic = row.topic.orEmpty(),
+                            cloudId = row.id,
+                            syncStatus = "synced"
+                        )
+                    )
+                    newQuestions++
+                }
+
+                val localReasons = database.replacementReasonDao().getAllOnce()
+                val reasonsByCloudId =
+                    localReasons.filter { it.cloudId != null }.associateBy { it.cloudId }
+                val cloudReasons = SupabaseClient.client.postgrest.from("replacement_reasons")
+                    .select { }
+                    .decodeList<ReasonRow>()
+                for (row in cloudReasons) {
+                    if (reasonsByCloudId.containsKey(row.id)) continue
+                    val textMatch = localReasons.firstOrNull { it.reason == row.reason }
+                    if (textMatch != null) {
+                        if (textMatch.cloudId == null) {
+                            database.replacementReasonDao().update(textMatch.copy(cloudId = row.id))
+                        }
+                        continue
+                    }
+                    database.replacementReasonDao().insert(
+                        ReplacementReason(
+                            replacedQuestionText = row.replacedQuestionText.orEmpty(),
+                            reason = row.reason,
+                            timestamp = parseInstant(row.createdAt),
+                            cloudId = row.id,
+                            syncStatus = "synced"
+                        )
+                    )
+                    newReasons++
+                }
+                Result.success(newQuestions to newReasons)
+            } catch (e: Exception) {
+                Result.failure(mapError(e))
+            }
+        }
+
+    /** Шаг 31.1: восстановление всего — учебники + вопросы + причины. */
+    suspend fun restoreAll(context: Context): Result<Triple<Int, Int, Int>> {
+        val textbookResult = TextbookRepository.restoreFromCloud(context)
+        val restoredTextbooks = textbookResult.getOrNull()
+            ?: return Result.failure(
+                textbookResult.exceptionOrNull() ?: Exception("Не удалось восстановить")
+            )
+        val pullResult = pullQuestionsAndReasons(context)
+        val pulled = pullResult.getOrNull()
+            ?: return Result.failure(
+                pullResult.exceptionOrNull() ?: Exception("Не удалось восстановить")
+            )
+        return Result.success(Triple(restoredTextbooks, pulled.first, pulled.second))
+    }
+
+    /** Шаг 31.1: автоподтягивание при старте — не чаще раза в 5 минут. */
+    suspend fun pullAllIfStale(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoPullAt < 5 * 60_000L) return
+        lastAutoPullAt = now
+        runCatching { pullQuestionsAndReasons(context) }
+    }
+
+    private fun parseInstant(value: String?): Long =
+        runCatching { java.time.Instant.parse(value).toEpochMilli() }
+            .getOrDefault(System.currentTimeMillis())
+
+    private fun mapError(e: Exception): Exception {
+        val raw = e.message ?: ""
+        return when {
+            raw.contains("row-level security", ignoreCase = true) ->
+                Exception(
+                    "Supabase заблокировал операцию (RLS). Выполните SQL-скрипт из инструкции шага 31 в SQL Editor и повторите."
+                )
+            else -> e
+        }
     }
 }

@@ -221,6 +221,9 @@ fun AppNavigation() {
             navScope.launch {
                 TextbookRepository.syncAllPending(appContext)
                 QuestionSyncRepository.syncAll(appContext)
+                // Шаг 31.1: автоподтягивание изменений из веб-версии
+                // (не чаще раза в 5 минут).
+                QuestionSyncRepository.pullAllIfStale(appContext)
             }
         }
     }

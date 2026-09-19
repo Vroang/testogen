@@ -29,6 +29,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -659,6 +660,10 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+                if (restoring) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
                 if (confirmRestore) {
                     AlertDialog(
                         onDismissRequest = { confirmRestore = false },
@@ -673,13 +678,13 @@ fun SettingsScreen(
                                 confirmRestore = false
                                 restoring = true
                                 scope.launch {
-                                    val result = TextbookRepository.restoreFromCloud(context)
+                                    val result = QuestionSyncRepository.restoreAll(context)
                                     restoring = false
                                     result.fold(
-                                        onSuccess = { n ->
+                                        onSuccess = { counts ->
                                             Toast.makeText(
                                                 context,
-                                                "Восстановлено учебников: $n",
+                                                "Восстановлено: ${counts.first} учебников, ${counts.second} вопросов, ${counts.third} причин",
                                                 Toast.LENGTH_LONG
                                             ).show()
                                         },
