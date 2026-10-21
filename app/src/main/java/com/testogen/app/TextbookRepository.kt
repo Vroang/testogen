@@ -146,8 +146,8 @@ object TextbookRepository {
                     uploadedAt = System.currentTimeMillis(),
                     storagePath = "$bookId.$format",
                     localCachePath = localFile.absolutePath,
-                    syncStatus = "pending_upload",
-                    userId = AuthManager.currentUserAsync()?.id.orEmpty()
+                    syncStatus = "synced",
+                    userId = ""
                 )
                 val database = db(context)
                 database.textbookDao().insert(book)
@@ -164,17 +164,6 @@ object TextbookRepository {
                         )
                     }
                 )
-
-                // Фоновая попытка отправки в облако (может не удаться —
-                // статус останется pending_upload)
-                runCatching { syncTextbookToCloud(context, book) }
-                    .onSuccess {
-                        CoroutineScope(Dispatchers.IO).launch {
-                            database.textbookDao().update(
-                                book.copy(syncStatus = "synced")
-                            )
-                        }
-                    }
 
                 Result.success(book)
             } catch (e: Exception) {

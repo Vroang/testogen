@@ -195,9 +195,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         // Проверка обновлений — один раз за запуск приложения
         var updateCheckStarted = false
-
-        // Шаг 32: onResume-синхронизация не чаще раза в 5 минут
-        var lastResumeSyncAt = 0L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -208,89 +205,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        // Шаг 32: при возврате из фона — синхронизация с подтверждением.
-        val now = System.currentTimeMillis()
-        if (now - lastResumeSyncAt > 5 * 60_000L) {
-            lastResumeSyncAt = now
-            val app = applicationContext
-            CoroutineScope(Dispatchers.Main).launch {
-                CloudSyncRepository.syncWithCloud(app, showPrompt = true)
-            }
-        }
-    }
 }
 
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-    val navScope = rememberCoroutineScope()
-    // Шаг 28.1: стартовый маршрут решается ПОСЛЕ асинхронной
-    // загрузки сохранённой сессии Supabase.
-    var startDestination by remember { mutableStateOf<String?>(null) }
-    val appContext = LocalContext.current.applicationContext
-    LaunchedEffect(Unit) {
-        val signedIn = AuthManager.requireSignedIn()
-        startDestination = if (signedIn) "main" else "login"
-        if (signedIn) {
-            // Шаг 30/31/32: push локального + обратная синхронизация
-            // с подтверждением (диалог появится сам при изменениях).
-            CloudSyncState.lastDeclinedHash =
-                (appContext as TestoGenApp).settingsRepository.getPendingChangesHash()
-            navScope.launch {
-                CloudSyncRepository.syncWithCloud(appContext, showPrompt = true)
-            }
-        }
-    }
-    val destination = startDestination
-    if (destination == null) {
-        // Пока идёт проверка — маленький индикатор вместо пустого экрана.
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator()
-        }
-        return
-    }
-    var changesApplying by remember { mutableStateOf(false) }
 
-    fun startApplyChanges(onDone: () -> Unit) {
-        val changes = CloudSyncState.pendingChanges
-        if (changes == null) {
-            onDone()
-            return
-        }
-        changesApplying = true
-        navScope.launch {
-            val result = CloudSyncRepository.applyCloudChanges(appContext, changes)
-            changesApplying = false
-            result.fold(
-                onSuccess = { counts ->
-                    CloudSyncState.pendingChanges = null
-                    Toast.makeText(
-                        appContext,
-                        "Синхронизировано: +${counts.first} ~${counts.second} −${counts.third}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                },
-                onFailure = { e ->
-                    Toast.makeText(
-                        appContext,
-                        "Не удалось применить: ${e.message ?: "ошибка"}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            )
-            onDone()
-        }
-    }
+    // Шаг 33: авторизации больше нет — приложение всегда
+    // открывается сразу, все данные живут на телефоне.
+    val startDestination = "main"
 
     NavHost(
         navController = navController,
-        startDestination = destination,
+        startDestination = startDestination,
         enterTransition = {
             fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 8 }
         },
@@ -345,27 +272,14 @@ fun AppNavigation() {
             )
         }
         composable("login") {
-            LoginScreen(
-                onSignedIn = {
-                    navController.navigate("main") {
-                        popUpTo("login") { inclusive = true }
-                    }
-                }
-            )
+            // Шаг 33: экран входа удалён — маршрут оставлен пустым
+            // на случай отката.
         }
         composable("settings") {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenAiInstructions = { navController.navigate("ai_instructions_editor") },
-                onOpenAiLog = { navController.navigate("ai_log") },
-                onSignOut = {
-                    navScope.launch {
-                        AuthManager.signOut()
-                        navController.navigate("login") {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    }
-                }
+                onOpenAiLog = { navController.navigate("ai_log") }
             )
         }
         composable("ai_instructions_editor") {
@@ -391,43 +305,6 @@ fun AppNavigation() {
                 onBack = { navController.popBackStack() }
             )
         }
-        composable("changes_detail") {
-            val changes = CloudSyncState.pendingChanges
-            if (changes == null) {
-                navController.popBackStack()
-            } else {
-                ChangesDetailScreen(
-                    changes = changes,
-                    applying = changesApplying,
-                    onBack = { navController.popBackStack() },
-                    onApply = { startApplyChanges { navController.popBackStack() } }
-                )
-            }
-        }
-    }
-
-    // Шаг 32: диалог подтверждения изменений из веб-версии.
-    CloudSyncState.pendingChanges?.let { changes ->
-        CloudChangesDialog(
-            changes = changes,
-            applying = changesApplying,
-            onCancel = {
-                val declined = changes
-                CloudSyncState.pendingChanges = null
-                navScope.launch {
-                    val hash = declined.hashCode().toString()
-                    (appContext as TestoGenApp).settingsRepository.setPendingChangesHash(hash)
-                    CloudSyncState.lastDeclinedHash = hash
-                    Toast.makeText(
-                        appContext,
-                        "Изменения отложены. Можно применить вручную в Настройках",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            },
-            onDetails = { navController.navigate("changes_detail") },
-            onApply = { startApplyChanges { } }
-        )
     }
 }
 
@@ -1896,17 +1773,8 @@ fun QuestionBankScreen(
         if (activeTab == "internet" && !internetTopicTouched && genTopic.isBlank()) {
             genTopic = AppState.mainTopic
         }
-        if (activeTab == "file") {
-            // Шаг 30/31: попытка досинхронизировать всё ожидающее.
-            scope.launch {
-                TextbookRepository.syncAllPending(context.applicationContext)
-                QuestionSyncRepository.syncAll(context.applicationContext)
-            }
-        }
-        if (activeTab == "manual") {
-            // Шаг 32: обратная синхронизация с подтверждением.
-            scope.launch { CloudSyncRepository.syncWithCloud(context) }
-        }
+        // Шаг 33: синхронизация с облаком полностью ручная —
+        // никаких фоновых обращений к сети.
     }
 
     var topicFilter by remember { mutableStateOf<String?>(null) }
@@ -2063,37 +1931,6 @@ fun QuestionBankScreen(
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
-                    }
-                    if (CloudSyncState.isSyncing) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else if (CloudSyncState.lastDeclinedHash.isNotEmpty()) {
-                        // Шаг 32: есть отложенные изменения — можно открыть снова.
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.clickable {
-                                scope.launch {
-                                    CloudSyncRepository.syncWithCloud(
-                                        context,
-                                        showPrompt = true,
-                                        ignoreDeclinedHash = true
-                                    )
-                                }
-                            }
-                        ) {
-                            Text(
-                                text = "!",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
                     }
                 }
 

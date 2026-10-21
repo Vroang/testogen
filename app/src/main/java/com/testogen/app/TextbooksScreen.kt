@@ -78,11 +78,6 @@ fun TextbooksScreen(
     var pendingDelete by remember { mutableStateOf<Textbook?>(null) }
     val dateFormat = remember { SimpleDateFormat("d MMM yy", Locale("ru")) }
 
-    // Шаг 30: при открытии списка — догоаляем всё, что ждёт облака.
-    LaunchedEffect(Unit) {
-        TextbookRepository.syncAllPending(context)
-    }
-
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
