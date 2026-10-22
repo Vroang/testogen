@@ -18,3 +18,6 @@ tail_new.txt
 step22_append.txt
 braces.ps1
 report.txt
+
+# Образцы (учебник под авторским правом) — никогда не коммитить
+/examples/
