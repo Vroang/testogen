@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Файлы, которые приложение отдаёт другим: обновление (APK) и экспорт (docx). -->
 <paths>
-    <external-path name="external_files" path="." />
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
+    <cache-path name="downloads" path="downloads/" />
     <cache-path name="shared" path="shared/" />
 </paths>

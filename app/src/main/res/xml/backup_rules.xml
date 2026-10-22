@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: в облачную копию и при переносе на новый телефон не попадают ключи нейросети и кэш. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/secrets.preferences_pb" />
+        <exclude domain="file" path="tmp" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/secrets.preferences_pb" />
+        <exclude domain="file" path="tmp" />
+    </device-transfer>
+</data-extraction-rules>

@@ -20,6 +20,26 @@ Android-приложение для одного пользователя (ма�
 - `C:\Users\Ivan\Desktop\TestGenerator` — запасная копия, не трогать.
 - Комментарии и строки интерфейса — на русском.
 
+## Архитектура
+
+Один модуль `:app`, пакет `com.testogen.app`. Ручное внедрение зависимостей: `AppContainer`
+(создаётся в `TestoGenApp`, в Compose доступен через `LocalAppContainer`).
+
+| Где | Что |
+|---|---|
+| `data/db/` | Room: `Entities.kt` (вопросы, тесты и их элементы, правила ИИ, причины замен, журнал запросов), `AppDatabase.kt` (DAO). База `testogen2.db`, схема в `app/schemas`. До первого релиза — destructive migration |
+| `data/prefs/` | DataStore: `prefs` (настройки), `secrets` (ключи DeepSeek/OpenRouter, исключён из бэкапа); `LegacyCleanup` — разовая уборка данных старой версии ≤ 49 и перенос её ключа OpenRouter |
+| `update/Updater.kt` | Автообновление из GitHub Releases (`StateFlow` состояния, диалог в `ui/main/UpdateDialog.kt`) |
+| `ui/theme/` | Только светлая тёплая палитра (`Palette`), шрифт Golos Text (`res/font`, OFL — `licenses/`), типографика крупнее стандартной, `AppIcons` — свои векторные иконки |
+| `ui/components/` | Общие элементы: `SoftCard`, `PrimaryButton`, `SecondaryButton`, `ScreenHeader`, `BackHeader`, `EmptyState`, `DifficultyTag` |
+| `ui/main/` | `AppRoot` (NavHost, type-safe маршруты, переходы), `MainScreen` (вкладки Тесты / Вопросы / Учебники) |
+| `ui/tests`, `ui/bank`, `ui/textbooks`, `ui/settings`, `ui/ailog` | Экраны; ViewModel рядом с экраном, создаётся через `viewModel { … }` |
+| `util/Format.kt` | Даты, доллары, русское склонение |
+
+Плавность: тяжёлое — только вне главного потока; ленивые списки с `key` и `contentType`;
+анимации нажатий — в фазе отрисовки (`graphicsLayer`). Замеры делать на варианте `benchmark`
+(R8, без отладки, debug-подпись): `./gradlew assembleBenchmark`.
+
 ## Окружение сборки (всё на диске D, как в AudCut)
 
 ```bash
@@ -31,7 +51,8 @@ export GRADLE_OPTS="-Duser.home=D:/Dev/Programs/AndroidUserHome -Djava.io.tmpdir
 ./gradlew assembleDebug
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`.
+APK: `app/build/outputs/apk/debug/app-debug.apk` (`benchmark` — `app/build/outputs/apk/benchmark/`).
+Инструменты: AGP 9.4.1, Kotlin 2.4.21, Gradle 9.8.1, Compose BOM 2026.09.00, compileSdk/targetSdk 37 — версии в `gradle/libs.versions.toml`.
 Release с подписью собирает только GitHub Actions (`.github/workflows/release.yml`) по тегу
 `v<versionCode>`; ключ — в GitHub Secrets. `applicationId` (`com.testogen.app`) и подпись
 не менять: обновление ставится маме поверх старой версии через встроенный апдейтер,

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 и ниже: ключи нейросети не попадают в резервную копию. -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/secrets.preferences_pb" />
+    <exclude domain="file" path="tmp" />
+</full-backup-content>

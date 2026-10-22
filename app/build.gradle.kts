@@ -1,23 +1,24 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.devtools.ksp")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
     namespace = "com.testogen.app"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
+        // applicationId и подпись релиза не менять: обновление ставится поверх старой версии
         applicationId = "com.testogen.app"
         minSdk = 26
-        targetSdk = 34
-        // AGP требует versionCode >= 1; номер растёт монотонно
-        // (шаг 3.1 занял 6, поэтому шаг 33 = 49)
-        versionCode = 49
-        versionName = "0.33-step33"
+        targetSdk = 37
+        // versionCode растёт монотонно; тег релиза v<versionCode> (старая ветка закончилась на 49)
+        versionCode = 50
+        versionName = "2.0-dev"
     }
 
     signingConfigs {
@@ -34,52 +35,65 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
             signingConfig = signingConfigs.getByName("release")
         }
+        // Как release (R8, без отладки), но с debug-подписью — для замеров плавности
+        // на телефоне и для Baseline Profile. Маме не отдаётся.
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
+        }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+
     buildFeatures {
         compose = true
         buildConfig = true
     }
 }
 
+// Схема базы сохраняется в app/schemas — нужна для будущих миграций
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
-    implementation("androidx.activity:activity-compose:1.9.1")
-    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
 
-    implementation("androidx.navigation:navigation-compose:2.8.0")
-
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
-
-    // Supabase (шаг 27): BOM 2.6.0 совместим с Kotlin 2.0.20.
-    // В 2.x модуль авторизации называется gotrue-kt (в 3.x — auth-kt).
-    implementation(platform("io.github.jan-tennert.supabase:bom:2.6.0"))
-    implementation("io.github.jan-tennert.supabase:postgrest-kt")
-    implementation("io.github.jan-tennert.supabase:storage-kt")
-    implementation("io.github.jan-tennert.supabase:gotrue-kt")
-    implementation("io.ktor:ktor-client-okhttp:2.3.12")
-
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    testImplementation(libs.junit)
 }

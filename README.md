@@ -6,7 +6,7 @@ Android-приложение (Jetpack Compose, Material 3): банк вопро�
 
 ## Сборка
 
-- JDK 17, Android SDK 34.
+- JDK 17+, Android SDK 37 (окружение — в `CLAUDE.md`).
 - `./gradlew assembleDebug` — debug-сборка.
 - Готовые APK — в разделе [Releases](https://github.com/Vroang/testogen/releases).
 
@@ -16,5 +16,4 @@ Release-APK собирается автоматически workflow-ом `.gith
 ## Документы проекта
 
 - `VISION.md` — задумка приложения.
-- `PLAN.md` — план разработки по шагам.
-- `PROGRESS.md` — журнал выполненных шагов.
+- `PLAN.md` — план переписывания по этапам и их статус.
