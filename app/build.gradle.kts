@@ -52,6 +52,13 @@ android {
             matchingFallbacks += listOf("release")
             isDebuggable = false
         }
+        // Шаг 6: как benchmark, но без R8 — на нём записывается Baseline Profile с настоящими
+        // именами классов (tools/baseline_profile.sh). Готовый профиль — src/main/baseline-prof.txt.
+        create("profiling") {
+            initWith(getByName("benchmark"))
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
     }
 
     compileOptions {
@@ -112,6 +119,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.work.runtime)
     implementation(libs.pdfbox.android)
+    // Ставит Baseline Profile при установке не из Play (APK с GitHub) — быстрее запуск и прокрутка
+    implementation(libs.androidx.profileinstaller)
 
     testImplementation(libs.junit)
 }

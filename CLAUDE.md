@@ -32,7 +32,7 @@ Android-приложение для одного пользователя (ма�
 
 | Где | Что |
 |---|---|
-| `data/db/` | Room: `Entities.kt` (вопросы, тесты и их элементы, правила ИИ, причины замен, журнал запросов), `AppDatabase.kt` (DAO). База `testogen2.db`, схема в `app/schemas`. До первого релиза — destructive migration |
+| `data/db/` | Room: `Entities.kt` (вопросы, тесты и их элементы, правила ИИ, причины замен, журнал запросов), `AppDatabase.kt` (DAO). База `testogen2.db`, схемы в `app/schemas`. **С этапа 6 при любом изменении структуры — миграция** (`addMigrations`), пересоздание с потерей данных убрано |
 | `data/prefs/` | DataStore: `prefs` (настройки), `secrets` (ключи DeepSeek/OpenRouter, исключён из бэкапа); `LegacyCleanup` — разовая уборка данных старой версии ≤ 49 и перенос её ключа OpenRouter |
 | `ai/` | `AiClient` (DeepSeek → OpenRouter, журнал с токенами и ценой, понятные ошибки, баланс), `Prompts` (неизменные system-промпты), `QuestionQuality` (разбор JSON, проверки, отсев повторов — покрыто юнит-тестами), `QuestionGenerator` (порции, рецензент, оценка цены), `Pricing`, `RulesUpdater` |
 | `work/GenerationJobs.kt` | Задания генерации в базе + `GenerationWorker` (WorkManager, foreground-уведомление); при запуске приложения незавершённые задания продолжаются |
@@ -53,6 +53,16 @@ Android-приложение для одного пользователя (ма�
 анимации нажатий — в фазе отрисовки (`graphicsLayer`). Замеры делать на варианте `benchmark`
 (R8, без отладки, debug-подпись): `./gradlew assembleBenchmark`.
 
+Baseline Profile: `app/src/main/baseline-prof.txt` (ставит `profileinstaller`; холодный запуск
+≈575 → ≈430 мс). Перезаписать после крупных изменений UI скриптом `tools/baseline_profile.sh`
+на варианте `profiling` (как benchmark, но без R8). UiAutomator/Macrobenchmark на телефоне TECNO
+зависают (`pressHome`, `fling` бесконечно ждут простоя) — поэтому профиль пишется через adb и
+`pm dump-profiles`.
+
+Размер APK (~3,4 МБ): в `app/build.gradle.kts` исключены постквантовые таблицы BouncyCastle и
+CJK-кодировки pdfbox (`Identity-H/V` оставлены). Если когда-нибудь понадобится китайский/японский
+PDF — убрать исключения.
+
 ## Окружение сборки (всё на диске D, как в AudCut)
 
 ```bash
@@ -67,7 +77,10 @@ export GRADLE_OPTS="-Duser.home=D:/Dev/Programs/AndroidUserHome -Djava.io.tmpdir
 APK: `app/build/outputs/apk/debug/app-debug.apk` (`benchmark` — `app/build/outputs/apk/benchmark/`).
 Инструменты: AGP 9.4.1, Kotlin 2.4.21, Gradle 9.8.1, Compose BOM 2026.09.00, compileSdk/targetSdk 37 — версии в `gradle/libs.versions.toml`.
 Release с подписью собирает только GitHub Actions (`.github/workflows/release.yml`) по тегу
-`v<versionCode>`; ключ — в GitHub Secrets. `applicationId` (`com.testogen.app`) и подпись
+`v<versionCode>`; ключ — в GitHub Secrets. Без ключей (локально) `assembleRelease` даёт
+`app-release-unsigned.apk`; release.yml берёт только подписанный `app-release.apk`.
+`.github/workflows/check.yml` — проверка без публикации (юнит-тесты, lint, release) на пуш в `rewrite`
+и PR в `main`; статус: `https://api.github.com/repos/Vroang/testogen/actions/runs?branch=rewrite` (gh не установлен). `applicationId` (`com.testogen.app`) и подпись
 не менять: обновление ставится маме поверх старой версии через встроенный апдейтер,
 который сравнивает число из тега с `versionCode`.
 

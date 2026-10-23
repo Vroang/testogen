@@ -12,3 +12,10 @@
   ```bash
   python tools/pymupdf_dump.py examples/учебник.pdf examples/book_lines.jsonl
   ```
+
+# Baseline Profile и проверка на телефоне
+
+- `ui.py` — нажать по тексту, снимок экрана, список надписей (`python tools/ui.py tap "Текст" | texts | shot имя | back`).
+  Путь к adb и телефон берутся из переменных `ADB` и `ADB_SERIAL`.
+- `baseline_profile.sh` — записать `app/src/main/baseline-prof.txt` (порядок действий — в начале скрипта).
+  Проверка эффекта: `cmd package compile -f -m verify` против `-m speed-profile` и `am start -W` (TotalTime).

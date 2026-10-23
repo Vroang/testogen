@@ -61,7 +61,12 @@
 - Файл ответов: таблица «вариант × номер вопроса» (по 20 номеров в строке), номер верного ответа.
 - Проверки на компьютере: `DocxExportTest` (метрики настоящего TNR), `PhoneDocxCheckTest` (файл с телефона в examples/check); шрифты Liberation (SIL OFL) в res/font, лицензия в licenses/.
 
-## Этап 6 — шлифовка и релиз ⏳
-- Baseline Profile, R8, замеры gfxinfo, анимации, скриншоты, релизная сборка без публикации.
-- Убрать `fallbackToDestructiveMigration` перед первым релизом новой версии.
-- Проверить, что GitHub Actions собирает новый тулчейн (JDK 17 на CI, compileSdk 37).
+## Этап 6 — шлифовка и релизная сборка ✅
+- APK 8,2 → 3,4 МБ: исключены постквантовые таблицы BouncyCastle и CJK-кодировки pdfbox (Identity-H/V оставлены); импорт учебника на телефоне после этого проверен (19 параграфов).
+- Release без ключей собирается неподписанным (для проверки R8 и размера); `release.yml` выкладывает только подписанный `app-release.apk`. versionName 2.0, versionCode 50.
+- `fallbackToDestructiveMigration` убран: дальше только миграции, схемы в `app/schemas`.
+- `.github/workflows/check.yml`: юнит-тесты, lint и release-сборка на JDK 17 на пуш в `rewrite` и PR в `main` — проходит.
+- Lint без ошибок (невидимые символы в коде заменены кодами, `forceDarkAllowed` только с API 29, `mutableIntStateOf` и т. п.); убран неиспользуемый snackbar главного экрана.
+- Baseline Profile (`app/src/main/baseline-prof.txt`, `profileinstaller`), запись — `tools/baseline_profile.sh` на варианте `profiling`. Холодный запуск: ≈575 мс без профиля → ≈430 мс с профилем.
+- Плавность (benchmark, весь маршрут: тест 40×30, предпросмотр 83 страниц, банк, учебник): 1,2 % «рваных» кадров, 95-й перцентиль 12 мс.
+- Не сделано: релиз (тег, GitHub Release) — только по разрешению пользователя; запасной OpenRouter не проверен — нужен ключ.
