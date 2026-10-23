@@ -19,3 +19,17 @@
   Путь к adb и телефон берутся из переменных `ADB` и `ADB_SERIAL`.
 - `baseline_profile.sh` — записать `app/src/main/baseline-prof.txt` (порядок действий — в начале скрипта).
   Проверка эффекта: `cmd package compile -f -m verify` против `-m speed-profile` и `am start -W` (TotalTime).
+
+# Сверка файла Word с предпросмотром
+
+- `layout_check.py` — `LayoutCheckTest` (`./gradlew testDebugUnitTest`) пишет в `app/build/layout-check` файлы .docx
+  для всех сочетаний раскладки и рядом .json — где по модели Paginator стоит каждый блок. Скрипт переводит .docx
+  в PDF через LibreOffice и сравнивает: число страниц, страницу и высоту каждого вопроса, наложения строк.
+  ```bash
+  pip install pymupdf
+  python tools/layout_check.py app/build/layout-check [--png]
+  ```
+  С телефона: debug-сборка при «Отправить оба файла» кладёт `cache/shared/layout.json` рядом с файлом теста
+  (`run-as com.testogen.app cat cache/shared/...`) — пару .docx + .json можно проверить тем же скриптом.
+- `check_cert.sh` — сертификат подписи APK должен совпадать с v49 (иначе обновление у мамы не встанет);
+  вызывается в `check.yml` и `release.yml`.

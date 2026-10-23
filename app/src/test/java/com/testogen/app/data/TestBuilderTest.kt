@@ -36,6 +36,23 @@ class TestBuilderTest {
     }
 
     @Test
+    fun allowRepeatsDoesNotRepeatWhenEnough() {
+        val r = TestBuilder.build(pool(120, topics = 3), variants = 4, perVariant = 30, allowRepeats = true, random = Random(3)) as TestBuilder.Result.Ok
+        val all = r.variants.flatten()
+        assertEquals(all.size, all.toSet().size)
+    }
+
+    @Test
+    fun sameTextCountsOnce() {
+        // Два одинаковых вопроса (например, по двум копиям учебника) — это один вопрос
+        val doubled = pool(20).flatMap { listOf(it.copy(text = "Вопрос ${it.id}?"), it.copy(id = it.id + 1000, text = "вопрос ${it.id}")) }
+        assertEquals(TestBuilder.Result.NotEnough(20, 40), TestBuilder.build(doubled, variants = 4, perVariant = 10, allowRepeats = false))
+        val r = TestBuilder.build(doubled, variants = 2, perVariant = 10, allowRepeats = false) as TestBuilder.Result.Ok
+        val texts = r.variants.flatten().map { it % 1000 }
+        assertEquals(texts.size, texts.toSet().size)
+    }
+
+    @Test
     fun hugeTestIsFast() {
         val start = System.nanoTime()
         val r = TestBuilder.build(pool(2000, topics = 5), variants = 40, perVariant = 40, allowRepeats = false) as TestBuilder.Result.Ok

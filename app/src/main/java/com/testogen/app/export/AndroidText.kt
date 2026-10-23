@@ -77,7 +77,7 @@ fun buildPreview(pages: List<Paginator.Page>, layout: DocLayout, text: AndroidTe
     }
     for (b in page.blocks) {
         when (b) {
-            is Paginator.PlacedTitle -> items += DrawItem.Line(b.x, b.y + baseline, "Вариант ${b.variant}", bold = true, size = size, center = true, width = b.width)
+            is Paginator.PlacedTitle -> items += DrawItem.Line(b.x, b.y + baseline, Paginator.titleText(b.variant, b.continued), bold = true, size = size, center = true, width = b.width)
             is Paginator.PlacedQuestion -> {
                 var y = b.y + if (b.atTop) 0f else Paginator.spacingBeforeQuestion(layout)
                 for (line in text.breakLines("${b.question.number}. ${b.question.text}", b.width, size, true)) {

@@ -79,6 +79,7 @@ class TextbookAnalyzerTest {
         assertEquals(50, book.paragraphs.first { it.numFrom == 6 }.bookPageStart)
         assertTrue(book.glossary.size > 30)
         assertEquals(9, book.grade)
+        assertEquals("Обществознание. 9 класс", book.title)
         assertTrue(book.warnings.joinToString(), book.warnings.isEmpty())
         // Колонтитулы выкинуты, переносы склеены
         val all = book.sections.flatMap { it.blocks }.joinToString("\n") { it.text }

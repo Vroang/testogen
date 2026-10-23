@@ -39,7 +39,7 @@ Android-приложение для одного пользователя (ма�
 | `work/GenerationJobs.kt` | Задания генерации в базе + `GenerationWorker` (WorkManager, foreground-уведомление); при запуске приложения незавершённые задания продолжаются |
 | `textbook/` | `TextbookAnalyzer` (структура по оформлению, сверка с оглавлением; тест на настоящем учебнике по выгрузкам из `examples/`, см. `tools/README.md`), `Extractors` (PDF — pdfbox-android, DOCX, TXT), `TextbookImporter`, `QuoteMatcher` (нестрогий поиск цитаты), `SectionText` |
 | `data/db/TextbookEntities.kt` | Учебники, главы, разделы, блоки текста, словарь + `TextbookDao` (поиск, разделить/соединить) |
-| `export/` | `DocxBuilder` (docx без библиотек), `Paginator` (раскладка как в Word, авто-выбор), `AndroidText` (Liberation Serif = метрики TNR, без кернинга/хинтинга), `DocLayout`. Сверка с LibreOffice: `soffice --headless --convert-to pdf` |
+| `export/` | `DocxBuilder` (docx без библиотек), `Paginator` (раскладка как в Word, авто-выбор; «несколько на листе» — таблица на каждую страницу, длинный вариант режется с «(продолжение)»), `AndroidText` (Liberation Serif = метрики TNR, без кернинга/хинтинга), `DocLayout` (поля в twips). Сверка с LibreOffice: `LayoutCheckTest` → `python tools/layout_check.py app/build/layout-check` (нужен `pip install pymupdf`); с телефона — debug-сборка кладёт `cache/shared/layout.json` при «Отправить» |
 | `data/TestBuilder.kt`, `data/TestRepository.kt` | Раскладка вопросов по вариантам; тесты в базе |
 | `data/QuestionRepository.kt` | Сохранение вопросов, `topicKey`/`cleanTopic` |
 | `update/Updater.kt` | Автообновление из GitHub Releases (`StateFlow` состояния, диалог в `ui/main/UpdateDialog.kt`) |
@@ -78,7 +78,8 @@ export GRADLE_OPTS="-Duser.home=D:/Dev/Programs/AndroidUserHome -Djava.io.tmpdir
 APK: `app/build/outputs/apk/debug/app-debug.apk` (`benchmark` — `app/build/outputs/apk/benchmark/`).
 Инструменты: AGP 9.4.1, Kotlin 2.4.21, Gradle 9.8.1, Compose BOM 2026.09.00, compileSdk/targetSdk 37 — версии в `gradle/libs.versions.toml`.
 Release с подписью собирает только GitHub Actions (`.github/workflows/release.yml`) по тегу
-`v<versionCode>`; ключ — в GitHub Secrets. Без ключей (локально) `assembleRelease` даёт
+`v<versionCode>`; ключ — в GitHub Secrets (сертификат v49 совпадает с `C:\Users\Ivan\.android\debug.keystore`, CN=Android Debug —
+этот файл беречь; `tools/check_cert.sh` сверяет сертификат с v49 в `check.yml` и `release.yml`). Без ключей (локально) `assembleRelease` даёт
 `app-release-unsigned.apk`; release.yml берёт только подписанный `app-release.apk`.
 `.github/workflows/check.yml` — проверка без публикации (юнит-тесты, lint, release) на пуш в `rewrite`
 и PR в `main`; статус: `https://api.github.com/repos/Vroang/testogen/actions/runs?branch=rewrite` (gh не установлен). `applicationId` (`com.testogen.app`) и подпись

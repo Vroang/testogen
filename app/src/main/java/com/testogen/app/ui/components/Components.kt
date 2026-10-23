@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -41,12 +43,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import com.testogen.app.data.db.Difficulty
 import com.testogen.app.ui.theme.DifficultyPalette
 import com.testogen.app.ui.theme.LocalDimens
@@ -114,6 +119,8 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    /** true — подпись всегда в одну строку: при крупном системном шрифте она уменьшается, а не переносится. */
+    singleLine: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val scale = pressScale(interaction)
@@ -125,14 +132,14 @@ fun PrimaryButton(
             .graphicsLayer { scale().let { scaleX = it; scaleY = it } },
         shape = MaterialTheme.shapes.medium,
         interactionSource = interaction,
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = if (singleLine) 12.dp else 24.dp, vertical = 14.dp),
         colors = ButtonDefaults.buttonColors(
             disabledContainerColor = Palette.SurfaceSunken,
             disabledContentColor = Palette.TextHint,
         ),
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp),
     ) {
-        ButtonContent(text, icon)
+        ButtonContent(text, icon, singleLine)
     }
 }
 
@@ -143,6 +150,8 @@ fun SecondaryButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    /** true — подпись всегда в одну строку: при крупном системном шрифте она уменьшается, а не переносится. */
+    singleLine: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val scale = pressScale(interaction)
@@ -154,23 +163,50 @@ fun SecondaryButton(
             .graphicsLayer { scale().let { scaleX = it; scaleY = it } },
         shape = MaterialTheme.shapes.medium,
         interactionSource = interaction,
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = if (singleLine) 12.dp else 22.dp, vertical = 14.dp),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = Palette.PrimarySoft,
             contentColor = Palette.OnPrimarySoft,
         ),
     ) {
-        ButtonContent(text, icon)
+        ButtonContent(text, icon, singleLine)
     }
 }
 
 @Composable
-private fun RowScope.ButtonContent(text: String, icon: ImageVector?) {
+private fun RowScope.ButtonContent(text: String, icon: ImageVector?, singleLine: Boolean) {
     if (icon != null) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
     }
-    Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+    val style = MaterialTheme.typography.labelLarge
+    if (singleLine) {
+        Text(
+            text,
+            style = style,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+            autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+        )
+    } else {
+        Text(text, style = style, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * Сплошная нижняя панель с кнопками над системной панелью навигации. Ставится под списком
+ * (а не поверх него), поэтому ничего не просвечивает и последний элемент списка не прячется.
+ */
+@Composable
+fun BottomPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(color = Palette.Surface, modifier = modifier.fillMaxWidth().softShadow(RectangleShape, elevation = 12.dp)) {
+        Column(
+            Modifier.navigationBarsPadding().padding(horizontal = LocalDimens.current.screenPadding, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
 }
 
 /** Крупный заголовок вкладки; справа — необязательные кнопки. */
@@ -327,7 +363,20 @@ fun ChoicePill(
         modifier = modifier.heightIn(min = 52.dp),
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 12.dp)) {
-            Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = if (singleLine) 1 else 3, softWrap = !singleLine)
+            val style = MaterialTheme.typography.labelLarge
+            if (singleLine) {
+                // Короткая подпись (класс, «Книжная»): при крупном системном шрифте уменьшается, а не обрезается
+                Text(
+                    text,
+                    style = style,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+                )
+            } else {
+                Text(text, style = style, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

@@ -37,6 +37,24 @@ class QuestionRepository(private val db: AppDatabase) {
 
     private val dao = db.questions()
 
+    /**
+     * Убирает «согласно тексту учебника», «в тексте» и т. п. из уже сохранённых вопросов нейросети
+     * (новые чистятся при разборе ответа). Возвращает, сколько вопросов исправлено.
+     */
+    suspend fun cleanSourceRefs(): Int {
+        var changed = 0
+        db.withTransaction {
+            for (q in dao.generatedTexts()) {
+                val clean = QuestionQuality.stripSourceRefs(q.text)
+                if (clean != q.text) {
+                    dao.setText(q.id, clean)
+                    changed++
+                }
+            }
+        }
+        return changed
+    }
+
     fun toEntity(draft: QuestionDraft, now: Long, id: Long = 0, createdAt: Long = now): QuestionEntity {
         require(draft.options.size == 4)
         val topic = cleanTopic(draft.topic)

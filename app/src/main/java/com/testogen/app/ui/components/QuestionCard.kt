@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import com.testogen.app.data.db.Difficulty
 import com.testogen.app.data.db.QuestionEntity
 import com.testogen.app.ui.theme.Palette
@@ -69,6 +70,7 @@ fun QuestionCard(
                 question.text,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
         }

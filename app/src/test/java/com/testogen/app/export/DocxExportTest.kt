@@ -3,30 +3,8 @@ package com.testogen.app.export
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.awt.Font
-import java.awt.font.FontRenderContext
-import java.awt.font.LineBreakMeasurer
-import java.awt.font.TextAttribute
 import java.io.File
-import java.text.AttributedString
 import java.util.zip.ZipInputStream
-
-/** Измерение настоящим Times New Roman (на компьютере) — для сверки с Word/LibreOffice. */
-private class AwtMeasurer : TextMeasurer {
-    private val frc = FontRenderContext(null, true, true)
-    override fun lines(text: String, widthPt: Float, sizePt: Float, bold: Boolean): Int {
-        if (text.isEmpty()) return 1
-        val font = Font("Times New Roman", if (bold) Font.BOLD else Font.PLAIN, 1).deriveFont(sizePt)
-        val s = AttributedString(text).apply { addAttribute(TextAttribute.FONT, font) }
-        val m = LineBreakMeasurer(s.iterator, frc)
-        var n = 0
-        while (m.position < text.length) {
-            m.nextLayout(widthPt)
-            n++
-        }
-        return n
-    }
-}
 
 class DocxExportTest {
 
@@ -62,7 +40,7 @@ class DocxExportTest {
         assertEquals(LayoutMode.COMPACT, layout.mode)
         assertTrue(layout.landscape)
         val pages = p.paginate(vs, layout)
-        File(out, "small.docx").writeBytes(DocxBuilder.test("Государство", vs, layout))
+        File(out, "small.docx").writeBytes(DocxBuilder.test("Государство", vs, layout, p))
         File(out, "small.txt").writeText("pages=${pages.size} layout=$layout")
         File(out, "answers.docx").writeBytes(DocxBuilder.answers("Государство", variants(12, 25)))
         assertValidZip(File(out, "small.docx"))
@@ -75,7 +53,7 @@ class DocxExportTest {
         val layout = p.auto(vs)
         assertEquals(LayoutMode.PER_PAGE, layout.mode)
         val pages = p.paginate(vs, layout)
-        File(out, "big.docx").writeBytes(DocxBuilder.test("Государство", vs, layout))
+        File(out, "big.docx").writeBytes(DocxBuilder.test("Государство", vs, layout, p))
         File(out, "big.txt").writeText("pages=${pages.size} layout=$layout\n" + pages.mapIndexed { i, pg -> "page ${i + 1}: " + pg.blocks.joinToString { b -> if (b is Paginator.PlacedTitle) "T${b.variant}" else "Q${(b as Paginator.PlacedQuestion).question.number}" } }.joinToString("\n"))
     }
 

@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -137,7 +138,7 @@ class TestBuilderViewModel(private val c: AppContainer) : ViewModel() {
 
     private fun refreshPool() {
         viewModelScope.launch {
-            pool = if (selected.isEmpty()) emptyList() else c.database.questions().candidates(selected, difficulties.map { it.code })
+            pool = if (selected.isEmpty()) emptyList() else TestBuilder.unique(c.database.questions().candidates(selected, difficulties.map { it.code }))
         }
     }
 
@@ -344,7 +345,7 @@ private fun Availability(vm: TestBuilderViewModel, jobs: List<GenerationJobEntit
                         PulsingBadge(AppIcons.Sparkle, active = true, size = 40.dp)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(job.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                            Text(job.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("${job.stage} ${job.saved} из ${job.total}", style = MaterialTheme.typography.bodySmall, color = Palette.TextSecondary)
                         }
                     }

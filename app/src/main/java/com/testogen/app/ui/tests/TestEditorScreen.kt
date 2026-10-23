@@ -13,13 +13,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -51,8 +48,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -67,6 +67,7 @@ import com.testogen.app.data.db.TestItemEntity
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.components.AppTextField
 import com.testogen.app.ui.components.BackHeader
+import com.testogen.app.ui.components.BottomPanel
 import com.testogen.app.ui.components.ChoicePill
 import com.testogen.app.ui.components.PrimaryButton
 import com.testogen.app.ui.components.PulsingBadge
@@ -204,83 +205,84 @@ fun TestEditorScreen(
     val variant = list.getOrNull(current).orEmpty()
     val listState = rememberLazyListState()
 
+    var panelHeight by remember { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 110.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item(key = "header") { BackHeader(test?.title ?: "Тест", onBack) }
-            item(key = "info") {
-                Row(Modifier.padding(horizontal = pad), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        test?.let { "${it.variantsCount} ${plural(it.variantsCount, "вариант", "варианта", "вариантов")} × ${it.questionsPerVariant} ${plural(it.questionsPerVariant, "вопрос", "вопроса", "вопросов")}" }.orEmpty(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Palette.TextSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { renaming = true }) { Text("Переименовать") }
+        Column(Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item(key = "header") { BackHeader(test?.title ?: "Тест", onBack) }
+                item(key = "info") {
+                    Row(Modifier.padding(horizontal = pad), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            test?.let { "${it.variantsCount} ${plural(it.variantsCount, "вариант", "варианта", "вариантов")} × ${it.questionsPerVariant} ${plural(it.questionsPerVariant, "вопрос", "вопроса", "вопросов")}" }.orEmpty(),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Palette.TextSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { renaming = true }) { Text("Переименовать") }
+                    }
                 }
-            }
-            item(key = "variants") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = pad),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(list.size, key = { it }) { i ->
-                        ChoicePill("Вариант ${i + 1}", i == current, { current = i; scope.launch { listState.scrollToItem(2) } })
+                item(key = "variants") {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = pad),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(list.size, key = { it }) { i ->
+                            ChoicePill("Вариант ${i + 1}", i == current, { current = i; scope.launch { listState.scrollToItem(2) } })
+                        }
+                    }
+                }
+                item(key = "hint") {
+                    Text(
+                        "Нажмите на вопрос, чтобы проверить ответы, заменить или изменить его.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Palette.TextHint,
+                        modifier = Modifier.padding(horizontal = pad),
+                    )
+                }
+                itemsIndexed(variant, key = { _, s -> "v$current-${s.item.position}-${s.item.questionId}" }, contentType = { _, _ -> "slot" }) { i, slot ->
+                    val q = slot.question
+                    if (q == null) {
+                        Text(
+                            "${i + 1}. Вопрос удалён из банка",
+                            color = Palette.Error,
+                            modifier = Modifier.padding(horizontal = pad),
+                        )
+                    } else {
+                        QuestionCard(
+                            q,
+                            number = i + 1,
+                            onReplace = { vm.openReplace(slot) },
+                            onEdit = { onEditQuestion(q.id) },
+                            onSource = { onSource(q) },
+                            onDelete = {
+                                vm.remove(slot)
+                                scope.launch {
+                                    snackbar.currentSnackbarData?.dismiss()
+                                    val r = snackbar.showSnackbar("Вопрос убран из варианта ${current + 1}", actionLabel = "Вернуть", duration = SnackbarDuration.Long)
+                                    if (r == SnackbarResult.ActionPerformed) vm.restore(slot)
+                                }
+                            },
+                            modifier = Modifier.padding(horizontal = pad).animateItem(fadeInSpec = tween(250), placementSpec = tween(300), fadeOutSpec = tween(200)),
+                        )
+                    }
+                }
+                item(key = "delete") {
+                    TextButton(onClick = { deleting = true }, modifier = Modifier.padding(horizontal = pad)) {
+                        Text("Удалить тест", color = Palette.TextSecondary)
                     }
                 }
             }
-            item(key = "hint") {
-                Text(
-                    "Нажмите на вопрос, чтобы проверить ответы, заменить или изменить его.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Palette.TextHint,
-                    modifier = Modifier.padding(horizontal = pad),
-                )
-            }
-            itemsIndexed(variant, key = { _, s -> "v$current-${s.item.position}-${s.item.questionId}" }, contentType = { _, _ -> "slot" }) { i, slot ->
-                val q = slot.question
-                if (q == null) {
-                    Text(
-                        "${i + 1}. Вопрос удалён из банка",
-                        color = Palette.Error,
-                        modifier = Modifier.padding(horizontal = pad),
-                    )
-                } else {
-                    QuestionCard(
-                        q,
-                        number = i + 1,
-                        onReplace = { vm.openReplace(slot) },
-                        onEdit = { onEditQuestion(q.id) },
-                        onSource = { onSource(q) },
-                        onDelete = {
-                            vm.remove(slot)
-                            scope.launch {
-                                snackbar.currentSnackbarData?.dismiss()
-                                val r = snackbar.showSnackbar("Вопрос убран из варианта ${current + 1}", actionLabel = "Вернуть", duration = SnackbarDuration.Long)
-                                if (r == SnackbarResult.ActionPerformed) vm.restore(slot)
-                            }
-                        },
-                        modifier = Modifier.padding(horizontal = pad).animateItem(fadeInSpec = tween(250), placementSpec = tween(300), fadeOutSpec = tween(200)),
-                    )
-                }
-            }
-            item(key = "delete") {
-                TextButton(onClick = { deleting = true }, modifier = Modifier.padding(horizontal = pad)) {
-                    Text("Удалить тест", color = Palette.TextSecondary)
-                }
+            // Внизу всегда под рукой: файлы теста
+            BottomPanel(Modifier.onSizeChanged { panelHeight = it.height }) {
+                PrimaryButton("Скачать и отправить", { onExport(testId) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, singleLine = true)
             }
         }
-        // Внизу всегда под рукой: файлы теста
-        Row(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = pad, vertical = 12.dp),
-        ) {
-            PrimaryButton("Скачать и отправить", { onExport(testId) }, Modifier.fillMaxWidth(), icon = AppIcons.Document)
-        }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = with(LocalDensity.current) { panelHeight.toDp() } + 8.dp))
     }
 
     vm.replacing?.let { slot ->
@@ -347,7 +349,7 @@ private fun ReplaceSheet(vm: TestEditorViewModel, slot: TestSlot) {
     ) {
         Text("Замена вопроса", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(6.dp))
-        Text(q.text, style = MaterialTheme.typography.bodyMedium, color = Palette.TextSecondary, maxLines = 3)
+        Text(q.text, style = MaterialTheme.typography.bodyMedium, color = Palette.TextSecondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(16.dp))
         AnimatedContent(
             vm.replaceState,

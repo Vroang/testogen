@@ -32,10 +32,18 @@ class AppPrefs(private val context: Context) {
         context.prefsStore.edit { it[REVIEW] = value }
     }
 
+    /** Какая версия разовой чистки банка уже проведена (см. QuestionRepository.cleanSourceRefs). */
+    val cleanupVersion: Flow<Int> = context.prefsStore.data.map { it[CLEANUP] ?: 0 }
+
+    suspend fun setCleanupVersion(value: Int) {
+        context.prefsStore.edit { it[CLEANUP] = value }
+    }
+
     companion object {
         const val DEFAULT_RATE = 103.0
         private val RATE = doublePreferencesKey("usd_rate")
         private val GRADE = intPreferencesKey("last_grade")
         private val REVIEW = booleanPreferencesKey("review_questions")
+        private val CLEANUP = intPreferencesKey("bank_cleanup_version")
     }
 }

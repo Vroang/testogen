@@ -149,7 +149,9 @@ interface TextbookDao {
 
     @Query(
         "SELECT t.id, t.title, t.format, t.grade, t.status, t.error, " +
-            "(SELECT COUNT(*) FROM textbook_sections s WHERE s.textbookId = t.id AND s.kind = 0) AS paragraphs " +
+            // Сдвоенный параграф «§ 2–3» — это два параграфа
+            "(SELECT COALESCE(SUM(CASE WHEN s.numTo > s.numFrom THEN s.numTo - s.numFrom + 1 ELSE 1 END), 0) " +
+            "FROM textbook_sections s WHERE s.textbookId = t.id AND s.kind = 0) AS paragraphs " +
             "FROM textbooks t ORDER BY t.createdAt DESC",
     )
     fun observeSummaries(): Flow<List<TextbookSummary>>

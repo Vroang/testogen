@@ -23,7 +23,8 @@ android {
 
     // Подпись релиза: на CI параметры приходят из GitHub Secrets. Локально без них release
     // собирается неподписанным — только чтобы проверить R8 и размер.
-    val hasReleaseKey = System.getenv("KEYSTORE_PASSWORD") != null
+    // Пустая строка — секрета нет (так GitHub подставляет отсутствующий секрет)
+    val hasReleaseKey = !System.getenv("KEYSTORE_PASSWORD").isNullOrEmpty()
     signingConfigs {
         create("release") {
             val storePath = System.getenv("KEYSTORE_PATH") ?: "release.keystore"

@@ -2,8 +2,8 @@ package com.testogen.app.data
 
 import kotlin.random.Random
 
-/** Минимум о вопросе, нужный для раскладки по вариантам. */
-data class Candidate(val id: Long, val difficulty: Int, val topicKey: String)
+/** Минимум о вопросе, нужный для раскладки по вариантам; [text] — чтобы не взять один и тот же вопрос дважды. */
+data class Candidate(val id: Long, val difficulty: Int, val topicKey: String, val text: String = "")
 
 /**
  * Раскладка вопросов банка по вариантам теста.
@@ -24,7 +24,19 @@ object TestBuilder {
     /** Сколько разных вопросов нужно для теста без повторов. */
     fun needed(variants: Int, perVariant: Int) = variants * perVariant
 
-    fun build(pool: List<Candidate>, variants: Int, perVariant: Int, allowRepeats: Boolean, random: Random = Random.Default): Result {
+    /**
+     * Банк без дублей: вопросы с одинаковым текстом (например, созданные дважды по двум копиям учебника)
+     * считаются одним — иначе «без повторов» один и тот же вопрос попал бы в разные варианты.
+     */
+    fun unique(pool: List<Candidate>): List<Candidate> =
+        pool.distinctBy { c -> c.text.lowercase().replace('ё', 'е').filter { it.isLetterOrDigit() }.ifEmpty { "#${c.id}" } }
+
+    /**
+     * Повторы между вариантами бывают, только если разных вопросов меньше, чем вариантов × вопросов,
+     * и [allowRepeats] включён явно; иначе — [Result.NotEnough].
+     */
+    fun build(all: List<Candidate>, variants: Int, perVariant: Int, allowRepeats: Boolean, random: Random = Random.Default): Result {
+        val pool = unique(all)
         val total = variants * perVariant
         if (pool.size >= total) return Result.Ok(deal(stratified(pool, total, random), variants, perVariant))
         if (!allowRepeats || pool.size < perVariant) {

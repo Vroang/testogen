@@ -14,10 +14,10 @@ object DocxBuilder {
 
     private fun tw(pt: Float) = (pt * 20).roundToInt()
 
-    /** Файл теста с выбранной раскладкой. */
-    fun test(title: String, variants: List<DocVariant>, l: DocLayout): ByteArray {
+    /** Файл теста с выбранной раскладкой; разбивку на страницы «несколько на листе» задаёт [paginator] — та же, что в предпросмотре. */
+    fun test(title: String, variants: List<DocVariant>, l: DocLayout, paginator: Paginator): ByteArray {
         val body = StringBuilder()
-        if (l.mode == LayoutMode.COMPACT) compactBody(body, variants, l) else perPageBody(body, variants, l)
+        if (l.mode == LayoutMode.COMPACT) compactBody(body, paginator.compactPages(variants, l), l) else perPageBody(body, variants, l)
         body.append(sectPr(l.landscape, l.margin, if (l.mode == LayoutMode.PER_PAGE) l.columns else 1, l.columnGap))
         return zip(title, document(body.toString()), styles(l.fontSize, l.lineHeight))
     }
@@ -62,36 +62,53 @@ object DocxBuilder {
 
     // ---------- тест ----------
 
-    private fun compactBody(sb: StringBuilder, variants: List<DocVariant>, l: DocLayout) {
-        sb.append("<w:tbl><w:tblPr><w:tblW w:w=\"${tw(l.contentWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>")
-        sb.append(if (l.cutLines) borders("dashed", "8C8C8C") else borders("nil", "auto"))
+    /**
+     * Каждая страница — своя таблица: перед ней крошечный пустой абзац (со второй страницы — «с новой страницы»),
+     * после последней — такой же. Так разрывы страниц стоят ровно там, где их поставил Paginator.
+     */
+    private fun compactBody(sb: StringBuilder, pages: List<List<Paginator.TableRow>>, l: DocLayout) {
         val pad = tw(l.cellPadding)
-        sb.append("<w:tblCellMar><w:top w:w=\"$pad\" w:type=\"dxa\"/><w:left w:w=\"$pad\" w:type=\"dxa\"/><w:bottom w:w=\"$pad\" w:type=\"dxa\"/><w:right w:w=\"$pad\" w:type=\"dxa\"/></w:tblCellMar>")
-        sb.append("</w:tblPr><w:tblGrid>")
-        repeat(l.columns) { sb.append("<w:gridCol w:w=\"${tw(l.columnWidth)}\"/>") }
-        sb.append("</w:tblGrid>")
-        for (row in variants.chunked(l.columns)) {
-            // Строка таблицы (ряд вариантов) не разрывается между страницами
-            sb.append("<w:tr><w:trPr><w:cantSplit/></w:trPr>")
-            for (i in 0 until l.columns) {
-                val v = row.getOrNull(i)
-                val content = StringBuilder()
-                if (v == null) content.append(paragraph("", size = l.fontSize, line = l.lineHeight)) else variantParagraphs(content, v, l, pageBreak = false)
-                sb.append(tc(l.columnWidth, content.toString()))
+        pages.forEachIndexed { p, rows ->
+            sb.append(separator(pageBreak = p > 0))
+            sb.append("<w:tbl><w:tblPr><w:tblW w:w=\"${tw(l.contentWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>")
+            sb.append(if (l.cutLines) borders("dashed", "8C8C8C") else borders("nil", "auto"))
+            sb.append("<w:tblCellMar><w:top w:w=\"$pad\" w:type=\"dxa\"/><w:left w:w=\"$pad\" w:type=\"dxa\"/><w:bottom w:w=\"$pad\" w:type=\"dxa\"/><w:right w:w=\"$pad\" w:type=\"dxa\"/></w:tblCellMar>")
+            sb.append("</w:tblPr><w:tblGrid>")
+            repeat(l.columns) { sb.append("<w:gridCol w:w=\"${tw(l.columnWidth)}\"/>") }
+            sb.append("</w:tblGrid>")
+            for (row in rows) {
+                // Строка таблицы (ряд вариантов) не разрывается между страницами
+                sb.append("<w:tr><w:trPr><w:cantSplit/></w:trPr>")
+                for (part in row.parts) {
+                    val content = StringBuilder()
+                    if (part == null) {
+                        content.append(paragraph("", size = l.fontSize, line = l.lineHeight))
+                    } else {
+                        variantParagraphs(content, Paginator.titleText(part.variant, part.continued), part.questions, l, pageBreak = false)
+                    }
+                    sb.append(tc(l.columnWidth, content.toString()))
+                }
+                sb.append("</w:tr>")
             }
-            sb.append("</w:tr>")
+            sb.append("</w:tbl>")
         }
-        sb.append("</w:tbl>")
+        sb.append(separator(pageBreak = false))
     }
+
+    /** Пустой абзац высотой [Paginator.SEPARATOR] пунктов. */
+    private fun separator(pageBreak: Boolean) =
+        "<w:p><w:pPr>" + (if (pageBreak) "<w:pageBreakBefore/>" else "") +
+            "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"${tw(Paginator.SEPARATOR)}\" w:lineRule=\"exact\"/>" +
+            "<w:rPr><w:sz w:val=\"2\"/><w:szCs w:val=\"2\"/></w:rPr></w:pPr></w:p>"
 
     private fun perPageBody(sb: StringBuilder, variants: List<DocVariant>, l: DocLayout) {
-        variants.forEachIndexed { i, v -> variantParagraphs(sb, v, l, pageBreak = i > 0) }
+        variants.forEachIndexed { i, v -> variantParagraphs(sb, Paginator.titleText(v.number, false), v.questions, l, pageBreak = i > 0) }
     }
 
-    private fun variantParagraphs(sb: StringBuilder, v: DocVariant, l: DocLayout, pageBreak: Boolean) {
+    private fun variantParagraphs(sb: StringBuilder, title: String, questions: List<DocQuestion>, l: DocLayout, pageBreak: Boolean) {
         sb.append(
             paragraph(
-                "Вариант ${v.number}",
+                title,
                 bold = true,
                 size = l.fontSize,
                 line = l.lineHeight,
@@ -101,7 +118,7 @@ object DocxBuilder {
                 pageBreakBefore = pageBreak,
             ),
         )
-        for (q in v.questions) {
+        for (q in questions) {
             // Вопрос и его варианты ответа держатся вместе
             sb.append(
                 paragraph(

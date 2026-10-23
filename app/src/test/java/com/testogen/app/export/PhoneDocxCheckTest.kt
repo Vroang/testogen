@@ -41,7 +41,7 @@ class PhoneDocxCheckTest {
         val cols = Regex("<w:cols w:num=\"(\\d+)\"").find(xml)!!.groupValues[1].toInt()
         val landscape = xml.contains("w:orient=\"landscape\"")
         val layout = DocLayout(LayoutMode.PER_PAGE, landscape, cols, size)
-        val pages = Paginator(AwtMeasurerForCheck()).paginate(variants, layout)
+        val pages = Paginator(AwtMeasurer()).paginate(variants, layout)
         val report = buildString {
             appendLine("pages=${pages.size} layout=$layout variants=${variants.size} q0=${variants.first().questions.size} opts=${variants.first().questions.map { it.options.size }} paragraphs=${paragraphs.size}")
             appendLine(paragraphs.take(3).joinToString(" || ") { it.take(60) })
@@ -53,7 +53,7 @@ class PhoneDocxCheckTest {
                 pg.blocks.filterIsInstance<Paginator.PlacedQuestion>().lastOrNull()?.let { appendLine("   last bottom=${it.y + it.height} limit=${layout.margin + layout.contentHeight}") }
             }
         }
-        val m = AwtMeasurerForCheck()
+        val m = AwtMeasurer()
         val v15 = variants[14]
         val detail = v15.questions.take(16).joinToString("\n") { q ->
             val t = m.lines("${q.number}. ${q.text}", layout.textWidth, layout.fontSize, true)
@@ -62,21 +62,5 @@ class PhoneDocxCheckTest {
         }
         File("build/phone-check.txt").writeText(report + "\n" + detail)
         println(report)
-    }
-}
-
-private class AwtMeasurerForCheck : TextMeasurer {
-    private val frc = java.awt.font.FontRenderContext(null, true, true)
-    override fun lines(text: String, widthPt: Float, sizePt: Float, bold: Boolean): Int {
-        if (text.isEmpty()) return 1
-        val font = java.awt.Font("Times New Roman", if (bold) java.awt.Font.BOLD else java.awt.Font.PLAIN, 1).deriveFont(sizePt)
-        val s = java.text.AttributedString(text).apply { addAttribute(java.awt.font.TextAttribute.FONT, font) }
-        val m = java.awt.font.LineBreakMeasurer(s.iterator, frc)
-        var n = 0
-        while (m.position < text.length) {
-            m.nextLayout(widthPt)
-            n++
-        }
-        return n
     }
 }

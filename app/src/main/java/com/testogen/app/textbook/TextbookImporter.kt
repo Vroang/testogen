@@ -55,7 +55,7 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
             ?: throw ImportException("Не удалось открыть файл")
         db.textbooks().insert(
             TextbookEntity(
-                title = name.substringBeforeLast('.').replace('_', ' ').trim(),
+                title = titleFromFileName(name),
                 fileName = name,
                 format = format,
                 filePath = target.absolutePath,
@@ -71,6 +71,7 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
         val file = File(book.filePath)
         try {
             progress.stage("Открываю учебник…")
+            var metaTitle: String? = null
             val pages = when (book.format) {
                 "pdf" -> {
                     PDFBoxResourceLoader.init(context)
@@ -80,7 +81,7 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
                             db.jobs().setDone(jobId, done)
                             progress.stage("Читаю страницу $done из $total…")
                         }
-                    }
+                    }.also { metaTitle = it.title }.pages
                 }
                 "docx" -> DocxExtractor.extract(file)
                 else -> TxtExtractor.extract(file)
@@ -99,7 +100,7 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
                 throw ImportException("Не нашёл в учебнике параграфов со знаком «§». Проверьте, тот ли это файл.")
             }
             progress.stage("Сохраняю…")
-            save(book, structure, pages.size)
+            save(book, structure, pages.size, metaTitle)
             db.jobs().setDone(jobId, pages.size.coerceAtLeast(1))
         } catch (e: ImportException) {
             if (db.textbooks().get(book.id)?.status != "scan") db.textbooks().setStatus(book.id, "failed", e.message)
@@ -110,7 +111,7 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
         }
     }
 
-    private suspend fun save(book: TextbookEntity, s: BookStructure, pageCount: Int) {
+    private suspend fun save(book: TextbookEntity, s: BookStructure, pageCount: Int, metaTitle: String?) {
         val dao = db.textbooks()
         db.withTransaction {
             dao.clearSections(book.id)
@@ -154,7 +155,9 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
                 )
             }
             dao.insertGlossary(s.glossary.map { GlossaryEntity(textbookId = book.id, term = it.term, definition = it.definition, pdfPage = it.pdfPage) })
-            val title = if (book.title.length < 4 || book.title.startsWith("book")) s.title ?: book.title else book.title
+            // Название из самого учебника; если мама уже переименовала его, пока шёл разбор, — её вариант
+            val fromFile = titleFromFileName(book.fileName)
+            val title = if (book.title != fromFile) book.title else chooseTitle(metaTitle, s.title, fromFile)
             dao.setReady(
                 book.id,
                 title = title,
@@ -163,6 +166,27 @@ class TextbookImporter(private val context: Context, private val db: AppDatabase
                 pageMap = s.bookPages.joinToString(",") { it?.toString().orEmpty() },
                 warnings = s.warnings.joinToString("\n"),
             )
+        }
+    }
+
+    companion object {
+        /** Имя файла без расширения, «_» → пробел; буквы не меняются (кириллица остаётся кириллицей). */
+        fun titleFromFileName(name: String) =
+            name.substringBeforeLast('.').replace('_', ' ').replace(Regex("\\s+"), " ").trim().ifEmpty { "Учебник" }
+
+        /**
+         * Название учебника: из свойств PDF, если оно осмысленное (русские буквы, не имя файла), иначе с титула
+         * («Обществознание. 9 класс»), иначе из имени файла. Мама может переименовать на экране учебника.
+         */
+        fun chooseTitle(meta: String?, fromTitlePage: String?, fromFile: String): String {
+            val m = meta?.let { TextbookAnalyzer.normalizeSpaces(it) }
+            val metaOk = m != null && m.length in 4..150 && m.any { it in 'А'..'я' || it == 'ё' || it == 'Ё' } &&
+                !Regex("""(?i)\.(pdf|docx?|indd|txt)$|microsoft word""").containsMatchIn(m)
+            return when {
+                metaOk -> m!!
+                !fromTitlePage.isNullOrBlank() -> fromTitlePage
+                else -> fromFile
+            }
         }
     }
 

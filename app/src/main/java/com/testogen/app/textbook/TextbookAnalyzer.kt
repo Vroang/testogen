@@ -562,7 +562,24 @@ object TextbookAnalyzer {
         return m?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it in 1..11 }
     }
 
-    private fun guessTitle(pages: List<RawPage>): String? =
-        pages.take(3).flatMap { it.lines }.maxByOrNull { it.size * (if (it.text.length >= 5) 1 else 0) }
-            ?.text?.let { prettyTitle(it) }
+    /**
+     * Название с титула: сначала выходные данные («Обществознание : 9-й класс : учебник / …»),
+     * иначе самая крупная надпись первых страниц («ОБЩЕСТВОЗНАНИЕ») и класс, если он найден.
+     */
+    private fun guessTitle(pages: List<RawPage>): String? {
+        val lines = pages.take(8).flatMap { it.lines }
+        for (line in lines) {
+            val m = IMPRINT_RE.find(normalizeSpaces(line.text)) ?: continue
+            return "${prettyTitle(m.groupValues[1].trim())}. ${m.groupValues[2]} класс"
+        }
+        val big = pages.take(3).flatMap { it.lines }
+            .filter { l -> l.text.count { it.isLetter() } >= 5 }
+            .maxByOrNull { it.size }
+            ?.text?.let { prettyTitle(it) } ?: return null
+        val grade = guessGrade(pages)
+        return if (grade != null && !big.contains("класс", ignoreCase = true)) "$big. $grade класс" else big
+    }
+
+    /** Выходные данные учебника: «Название : 9-й класс : учебник» или «Название. 9 класс : учебник». */
+    private val IMPRINT_RE = Regex("""^([А-ЯЁ][^:/\d]{2,80}?)\s*[.:]\s*(\d{1,2})(?:\s*[-‐–]\s*й)?\s+класс\s*:.*учебник""", RegexOption.IGNORE_CASE)
 }

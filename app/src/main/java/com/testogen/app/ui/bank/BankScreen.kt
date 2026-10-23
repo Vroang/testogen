@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -94,12 +95,14 @@ fun BankScreen(
                     icon = AppIcons.Sparkle,
                     onClick = { onGenerate("") },
                     modifier = Modifier.weight(1f),
+                    singleLine = true,
                 )
                 SecondaryButton(
                     text = "Вручную",
                     icon = Icons.Filled.Edit,
                     onClick = { onAddManual("") },
                     modifier = Modifier.weight(1f),
+                    singleLine = true,
                 )
             }
         }
@@ -161,7 +164,7 @@ private fun ActiveJobCard(job: GenerationJobEntity, onClick: () -> Unit, modifie
             PulsingBadge(AppIcons.Sparkle, active = true, size = 48.dp)
             Spacer(Modifier.width(14.dp))
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
-                Text(job.title, style = MaterialTheme.typography.titleMedium, color = Palette.OnPrimarySoft, maxLines = 1)
+                Text(job.title, style = MaterialTheme.typography.titleMedium, color = Palette.OnPrimarySoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${job.stage.ifBlank { "Готовлю задание…" }} ${job.saved} из ${job.total}",
                     style = MaterialTheme.typography.bodyMedium,

@@ -15,17 +15,14 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,7 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -43,18 +39,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.testogen.app.AppContainer
+import com.testogen.app.BuildConfig
 import com.testogen.app.export.AndroidText
 import com.testogen.app.export.DocLayout
 import com.testogen.app.export.DocQuestion
@@ -65,8 +64,10 @@ import com.testogen.app.export.LayoutMode
 import com.testogen.app.export.Paginator
 import com.testogen.app.export.PreviewPage
 import com.testogen.app.export.buildPreview
+import com.testogen.app.export.layoutJson
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.components.BackHeader
+import com.testogen.app.ui.components.BottomPanel
 import com.testogen.app.ui.components.ChoicePill
 import com.testogen.app.ui.components.CountStepper
 import com.testogen.app.ui.components.PrimaryButton
@@ -149,7 +150,7 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
         autoLayout?.let { apply(it) }
     }
 
-    fun testBytes() = DocxBuilder.test(title, variants, layout ?: autoLayout!!)
+    fun testBytes() = DocxBuilder.test(title, variants, layout ?: autoLayout!!, paginator)
     fun answersBytes() = DocxBuilder.answers(title, variants)
 
     fun fileName(kind: String) = "${title.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(60)} — $kind.docx"
@@ -173,6 +174,8 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
                 val dir = File(context.cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
                 val test = File(dir, fileName("тест")).apply { writeBytes(testBytes()) }
                 val answers = File(dir, fileName("ответы")).apply { writeBytes(answersBytes()) }
+                // Только для проверки разработчиком: раскладка предпросмотра для сверки с LibreOffice (tools/layout_check.py)
+                if (BuildConfig.DEBUG) layout?.let { File(dir, "layout.json").writeText(layoutJson(paginator.paginate(variants, it), it)) }
                 arrayListOf(test, answers).map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) }
             }
             val intent = Intent(Intent.ACTION_SEND_MULTIPLE)
@@ -199,10 +202,10 @@ fun ExportScreen(testId: Long, onBack: () -> Unit) {
     val layout = vm.layout
     var zoomed by remember { mutableStateOf<PreviewPage?>(null) }
 
-    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 190.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item(key = "header") { BackHeader("Файлы теста", onBack) }
@@ -225,16 +228,13 @@ fun ExportScreen(testId: Long, onBack: () -> Unit) {
                 PageView(page, i + 1, Modifier.padding(horizontal = pad).clickable { zoomed = page })
             }
         }
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = pad, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        BottomPanel {
             vm.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Palette.Primary) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton("Скачать тест", { saveTest.launch(vm.fileName("тест")) }, Modifier.weight(1f), enabled = layout != null)
-                SecondaryButton("Ответы", { saveAnswers.launch(vm.fileName("ответы")) }, Modifier.weight(1f), enabled = layout != null)
+                PrimaryButton("Скачать тест", { saveTest.launch(vm.fileName("тест")) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
+                SecondaryButton("Ответы", { saveAnswers.launch(vm.fileName("ответы")) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
             }
-            SecondaryButton("Отправить оба файла", { vm.share(context) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, enabled = layout != null)
+            SecondaryButton("Отправить оба файла", { vm.share(context) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, enabled = layout != null, singleLine = true)
         }
     }
 
@@ -288,7 +288,17 @@ private fun LayoutCard(layout: DocLayout, vm: ExportViewModel, modifier: Modifie
         if (layout.auto) {
             Text("Подобрана автоматически — можно поменять", style = MaterialTheme.typography.bodyMedium, color = Palette.TextSecondary)
         } else {
-            TextButton(onClick = vm::resetAuto, contentPadding = PaddingValues(0.dp)) { Text("Вернуть, как предлагает приложение") }
+            // Обычный текст-ссылка: длинная подпись переносится, а не обрезается по краям, как в TextButton
+            Text(
+                "Вернуть, как предлагает приложение",
+                style = MaterialTheme.typography.titleSmall,
+                color = Palette.Primary,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .clickable(onClick = vm::resetAuto)
+                    .padding(vertical = 8.dp),
+            )
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -306,8 +316,13 @@ private fun LayoutCard(layout: DocLayout, vm: ExportViewModel, modifier: Modifie
             ChoicePill("2 колонки", layout.columns == 2, { vm.change { it.copy(columns = 2) } }, Modifier.weight(1f), horizontalPadding = 4.dp)
         }
         Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Шрифт", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        // При крупном системном шрифте кнопки «−/+» уходят под подпись, а не ломают слово «Шрифт»
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Шрифт", style = MaterialTheme.typography.bodyLarge)
             CountStepper(layout.fontSize.toInt(), { v -> vm.change { it.copy(fontSize = v.toFloat()) } }, range = 10..14)
         }
         AnimatedVisibility(layout.mode == LayoutMode.COMPACT) {
@@ -356,6 +371,8 @@ private fun PageView(page: PreviewPage, number: Int, modifier: Modifier = Modifi
                 val canvas = c.nativeCanvas
                 canvas.save()
                 canvas.scale(scale, scale)
+                // Ничего не рисуется за краем листа
+                canvas.clipRect(0f, 0f, page.width, page.height)
                 for (item in page.items) {
                     when (item) {
                         is DrawItem.Line -> {
@@ -371,7 +388,13 @@ private fun PageView(page: PreviewPage, number: Int, modifier: Modifier = Modifi
             }
         }
         if (number > 0) {
-            Text("$number · нажмите, чтобы рассмотреть", style = MaterialTheme.typography.bodySmall, color = Palette.TextHint, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
+            Text(
+                "Страница $number · нажмите, чтобы рассмотреть",
+                style = MaterialTheme.typography.bodySmall,
+                color = Palette.TextSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
+            )
         }
     }
 }

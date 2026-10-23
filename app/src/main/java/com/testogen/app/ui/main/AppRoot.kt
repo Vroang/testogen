@@ -9,7 +9,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import com.testogen.app.ui.theme.Palette
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -112,130 +119,134 @@ fun AppRoot(debugTopic: String? = null) {
         if (debugTopic != null) nav.navigate(GenerateTopicRoute(debugTopic))
     }
 
-    NavHost(
-        navController = nav,
-        startDestination = MainRoute,
-        modifier = Modifier.fillMaxSize(),
-        enterTransition = enter,
-        exitTransition = exit,
-        popEnterTransition = popEnter,
-        popExitTransition = popExit,
-    ) {
-        composable<MainRoute> {
-            MainScreen(
-                onOpenSettings = { nav.navigate(SettingsRoute) },
-                onGenerate = { nav.navigate(GenerateTopicRoute(it)) },
-                onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
-                onOpenTopic = { key, title -> nav.navigate(TopicRoute(key, title)) },
-                onOpenJob = { nav.navigate(JobRoute(it)) },
-                onOpenTextbook = { nav.navigate(TextbookRoute(it)) },
-                onNewTest = { nav.navigate(TestBuilderRoute) },
-                onOpenTest = { nav.navigate(TestEditorRoute(it)) },
-            )
+    Box(Modifier.fillMaxSize()) {
+        NavHost(
+            navController = nav,
+            startDestination = MainRoute,
+            modifier = Modifier.fillMaxSize(),
+            enterTransition = enter,
+            exitTransition = exit,
+            popEnterTransition = popEnter,
+            popExitTransition = popExit,
+        ) {
+            composable<MainRoute> {
+                MainScreen(
+                    onOpenSettings = { nav.navigate(SettingsRoute) },
+                    onGenerate = { nav.navigate(GenerateTopicRoute(it)) },
+                    onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
+                    onOpenTopic = { key, title -> nav.navigate(TopicRoute(key, title)) },
+                    onOpenJob = { nav.navigate(JobRoute(it)) },
+                    onOpenTextbook = { nav.navigate(TextbookRoute(it)) },
+                    onNewTest = { nav.navigate(TestBuilderRoute) },
+                    onOpenTest = { nav.navigate(TestEditorRoute(it)) },
+                )
+            }
+            composable<TestBuilderRoute> {
+                TestBuilderScreen(
+                    onBack = { nav.popBackStack() },
+                    onBuilt = { id -> nav.navigate(TestEditorRoute(id)) { popUpTo<TestBuilderRoute> { inclusive = true } } },
+                )
+            }
+            composable<TestEditorRoute> { entry ->
+                val route = entry.toRoute<TestEditorRoute>()
+                TestEditorScreen(
+                    testId = route.id,
+                    onBack = { nav.popBackStack() },
+                    onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
+                    onSource = { q -> openSource(nav, q) },
+                    onExport = { nav.navigate(ExportRoute(it)) },
+                )
+            }
+            composable<ExportRoute> { entry ->
+                ExportScreen(testId = entry.toRoute<ExportRoute>().testId, onBack = { nav.popBackStack() })
+            }
+            composable<TextbookRoute> { entry ->
+                val route = entry.toRoute<TextbookRoute>()
+                TextbookScreen(
+                    textbookId = route.id,
+                    onBack = { nav.popBackStack() },
+                    onOpenSection = { id, start, end, query -> nav.navigate(ReaderRoute(id, start, end, query)) },
+                    onGenerate = { nav.navigate(GenerateTextbookRoute(it)) },
+                )
+            }
+            composable<ReaderRoute> { entry ->
+                val route = entry.toRoute<ReaderRoute>()
+                SectionReaderScreen(
+                    sectionId = route.sectionId,
+                    highlightStart = route.start,
+                    highlightEnd = route.end,
+                    query = route.query,
+                    onBack = { nav.popBackStack() },
+                    onOpenPdfPage = { book, page -> nav.navigate(PdfPageRoute(book, page)) },
+                )
+            }
+            composable<PdfPageRoute> { entry ->
+                val route = entry.toRoute<PdfPageRoute>()
+                PdfPageScreen(textbookId = route.textbookId, pdfPage = route.page, onBack = { nav.popBackStack() })
+            }
+            composable<GenerateTextbookRoute> { entry ->
+                val route = entry.toRoute<GenerateTextbookRoute>()
+                GenerateTextbookScreen(
+                    textbookId = route.textbookId,
+                    preselect = route.preselect,
+                    onBack = { nav.popBackStack() },
+                    onStarted = { id -> nav.navigate(JobRoute(id)) { popUpTo<GenerateTextbookRoute> { inclusive = true } } },
+                )
+            }
+            composable<SettingsRoute> {
+                SettingsScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenAiLog = { nav.navigate(AiLogRoute) },
+                    onOpenRules = { nav.navigate(RulesRoute) },
+                )
+            }
+            composable<RulesRoute> {
+                RulesScreen(onBack = { nav.popBackStack() })
+            }
+            composable<GenerateTopicRoute> { entry ->
+                val route = entry.toRoute<GenerateTopicRoute>()
+                GenerateTopicScreen(
+                    initialTopic = route.topic,
+                    onBack = { nav.popBackStack() },
+                    onOpenSettings = { nav.navigate(SettingsRoute) },
+                    // Экран настройки заменяется экраном хода генерации: «назад» ведёт туда, откуда пришли
+                    onStarted = { id -> nav.navigate(JobRoute(id)) { popUpTo<GenerateTopicRoute> { inclusive = true } } },
+                )
+            }
+            composable<JobRoute> { entry ->
+                val route = entry.toRoute<JobRoute>()
+                JobScreen(
+                    jobId = route.jobId,
+                    onBack = { nav.popBackStack() },
+                    onOpenTopic = { key, title ->
+                        nav.navigate(TopicRoute(key, title)) { popUpTo<JobRoute> { inclusive = true } }
+                    },
+                    onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
+                    onSource = { q -> openSource(nav, q) },
+                )
+            }
+            composable<TopicRoute> { entry ->
+                val route = entry.toRoute<TopicRoute>()
+                TopicQuestionsScreen(
+                    topicKey = route.key,
+                    title = route.title,
+                    onBack = { nav.popBackStack() },
+                    onGenerateMore = { nav.navigate(GenerateTopicRoute(it)) },
+                    onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
+                    onEdit = { nav.navigate(QuestionEditRoute(id = it)) },
+                    onSource = { q -> openSource(nav, q) },
+                )
+            }
+            composable<QuestionEditRoute> { entry ->
+                val route = entry.toRoute<QuestionEditRoute>()
+                QuestionEditScreen(id = route.id, defaultTopic = route.topic, onBack = { nav.popBackStack() })
+            }
+            composable<AiLogRoute> {
+                AiLogScreen(onBack = { nav.popBackStack() })
+            }
         }
-        composable<TestBuilderRoute> {
-            TestBuilderScreen(
-                onBack = { nav.popBackStack() },
-                onBuilt = { id -> nav.navigate(TestEditorRoute(id)) { popUpTo<TestBuilderRoute> { inclusive = true } } },
-            )
-        }
-        composable<TestEditorRoute> { entry ->
-            val route = entry.toRoute<TestEditorRoute>()
-            TestEditorScreen(
-                testId = route.id,
-                onBack = { nav.popBackStack() },
-                onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
-                onSource = { q -> openSource(nav, q) },
-                onExport = { nav.navigate(ExportRoute(it)) },
-            )
-        }
-        composable<ExportRoute> { entry ->
-            ExportScreen(testId = entry.toRoute<ExportRoute>().testId, onBack = { nav.popBackStack() })
-        }
-        composable<TextbookRoute> { entry ->
-            val route = entry.toRoute<TextbookRoute>()
-            TextbookScreen(
-                textbookId = route.id,
-                onBack = { nav.popBackStack() },
-                onOpenSection = { id, start, end, query -> nav.navigate(ReaderRoute(id, start, end, query)) },
-                onGenerate = { nav.navigate(GenerateTextbookRoute(it)) },
-            )
-        }
-        composable<ReaderRoute> { entry ->
-            val route = entry.toRoute<ReaderRoute>()
-            SectionReaderScreen(
-                sectionId = route.sectionId,
-                highlightStart = route.start,
-                highlightEnd = route.end,
-                query = route.query,
-                onBack = { nav.popBackStack() },
-                onOpenPdfPage = { book, page -> nav.navigate(PdfPageRoute(book, page)) },
-            )
-        }
-        composable<PdfPageRoute> { entry ->
-            val route = entry.toRoute<PdfPageRoute>()
-            PdfPageScreen(textbookId = route.textbookId, pdfPage = route.page, onBack = { nav.popBackStack() })
-        }
-        composable<GenerateTextbookRoute> { entry ->
-            val route = entry.toRoute<GenerateTextbookRoute>()
-            GenerateTextbookScreen(
-                textbookId = route.textbookId,
-                preselect = route.preselect,
-                onBack = { nav.popBackStack() },
-                onStarted = { id -> nav.navigate(JobRoute(id)) { popUpTo<GenerateTextbookRoute> { inclusive = true } } },
-            )
-        }
-        composable<SettingsRoute> {
-            SettingsScreen(
-                onBack = { nav.popBackStack() },
-                onOpenAiLog = { nav.navigate(AiLogRoute) },
-                onOpenRules = { nav.navigate(RulesRoute) },
-            )
-        }
-        composable<RulesRoute> {
-            RulesScreen(onBack = { nav.popBackStack() })
-        }
-        composable<GenerateTopicRoute> { entry ->
-            val route = entry.toRoute<GenerateTopicRoute>()
-            GenerateTopicScreen(
-                initialTopic = route.topic,
-                onBack = { nav.popBackStack() },
-                onOpenSettings = { nav.navigate(SettingsRoute) },
-                // Экран настройки заменяется экраном хода генерации: «назад» ведёт туда, откуда пришли
-                onStarted = { id -> nav.navigate(JobRoute(id)) { popUpTo<GenerateTopicRoute> { inclusive = true } } },
-            )
-        }
-        composable<JobRoute> { entry ->
-            val route = entry.toRoute<JobRoute>()
-            JobScreen(
-                jobId = route.jobId,
-                onBack = { nav.popBackStack() },
-                onOpenTopic = { key, title ->
-                    nav.navigate(TopicRoute(key, title)) { popUpTo<JobRoute> { inclusive = true } }
-                },
-                onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
-                onSource = { q -> openSource(nav, q) },
-            )
-        }
-        composable<TopicRoute> { entry ->
-            val route = entry.toRoute<TopicRoute>()
-            TopicQuestionsScreen(
-                topicKey = route.key,
-                title = route.title,
-                onBack = { nav.popBackStack() },
-                onGenerateMore = { nav.navigate(GenerateTopicRoute(it)) },
-                onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
-                onEdit = { nav.navigate(QuestionEditRoute(id = it)) },
-                onSource = { q -> openSource(nav, q) },
-            )
-        }
-        composable<QuestionEditRoute> { entry ->
-            val route = entry.toRoute<QuestionEditRoute>()
-            QuestionEditScreen(id = route.id, defaultTopic = route.topic, onBack = { nav.popBackStack() })
-        }
-        composable<AiLogRoute> {
-            AiLogScreen(onBack = { nav.popBackStack() })
-        }
+        // Подложка под строкой состояния: прокручиваемый текст уходит под неё, а не под часы и значки
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Palette.Background))
     }
 
     UpdateDialog()

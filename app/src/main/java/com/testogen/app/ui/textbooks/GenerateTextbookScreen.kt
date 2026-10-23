@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -167,8 +168,13 @@ fun GenerateTextbookScreen(textbookId: Long, preselect: Long, onBack: () -> Unit
         }
         item(key = "sections") {
             SoftCard(Modifier.fillMaxWidth().padding(horizontal = pad), contentPadding = PaddingValues(vertical = 12.dp)) {
-                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Параграфы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                // При крупном шрифте «Выбрать все» уходит на следующую строку, а не ломает слово «Параграфы»
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Параграфы", style = MaterialTheme.typography.titleMedium)
                     TextButton(onClick = { vm.selected = if (vm.selected.isEmpty()) vm.sections.map { it.id }.toSet() else emptySet() }) {
                         Text(if (vm.selected.isEmpty()) "Выбрать все" else "Снять все")
                     }

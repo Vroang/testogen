@@ -21,8 +21,12 @@ import kotlin.coroutines.coroutineContext
  */
 object PdfExtractor {
 
-    suspend fun extract(file: File, onPage: suspend (done: Int, total: Int) -> Unit): List<RawPage> {
+    /** Страницы и название из свойств PDF (если оно там есть). */
+    class Result(val pages: List<RawPage>, val title: String?)
+
+    suspend fun extract(file: File, onPage: suspend (done: Int, total: Int) -> Unit): Result {
         PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
+            val title = runCatching { doc.documentInformation?.title }.getOrNull()
             val total = doc.numberOfPages
             val stripper = LineStripper()
             val pages = ArrayList<RawPage>(total)
@@ -34,7 +38,7 @@ object PdfExtractor {
                 pages += RawPage(i, box.width, box.height, stripper.lines.toList())
                 onPage(i + 1, total)
             }
-            return pages
+            return Result(pages, title)
         }
     }
 

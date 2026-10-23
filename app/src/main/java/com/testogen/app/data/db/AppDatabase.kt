@@ -45,6 +45,13 @@ interface QuestionDao {
     @Query("SELECT COUNT(*) FROM questions")
     fun observeCount(): Flow<Int>
 
+    /** Тексты вопросов от нейросети (свои вопросы мамы не трогаются). */
+    @Query("SELECT id, text FROM questions WHERE source != 'manual'")
+    suspend fun generatedTexts(): List<IdText>
+
+    @Query("UPDATE questions SET text = :text WHERE id = :id")
+    suspend fun setText(id: Long, text: String)
+
     @Query(
         "SELECT MIN(topic) AS topic, topicKey, COUNT(*) AS count FROM questions " +
             "GROUP BY topicKey ORDER BY topicKey",
@@ -82,7 +89,7 @@ interface QuestionDao {
     @Query("SELECT MIN(topic) FROM questions GROUP BY topicKey ORDER BY MAX(updatedAt) DESC LIMIT 30")
     suspend fun recentTopics(): List<String>
 
-    @Query("SELECT id, difficulty, topicKey FROM questions WHERE topicKey IN (:topicKeys) AND difficulty IN (:difficulties)")
+    @Query("SELECT id, difficulty, topicKey, text FROM questions WHERE topicKey IN (:topicKeys) AND difficulty IN (:difficulties)")
     suspend fun candidates(topicKeys: List<String>, difficulties: List<Int>): List<com.testogen.app.data.Candidate>
 
     @Query("SELECT * FROM questions WHERE id IN (SELECT questionId FROM test_items WHERE testId = :testId)")
@@ -97,6 +104,8 @@ interface QuestionDao {
 }
 
 data class QuestionText(val text: String, val answer: String)
+
+data class IdText(val id: Long, val text: String)
 
 data class CodeCount(val code: Int, val count: Int)
 

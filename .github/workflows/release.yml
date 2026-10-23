@@ -35,6 +35,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
+      # Подпись должна совпадать со старыми версиями, иначе у мамы обновление не встанет — релиз не создаётся
+      - name: Signing certificate matches v49
+        run: bash tools/check_cert.sh app/build/outputs/apk/release/app-release.apk
+
       - name: Rename APK
         run: |
           mkdir -p output

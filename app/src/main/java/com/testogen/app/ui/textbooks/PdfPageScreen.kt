@@ -170,9 +170,9 @@ fun PdfPageScreen(textbookId: Long, pdfPage: Int, onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SecondaryButton("Назад", { vm.go(-1); scale = 1f; offset = Offset.Zero }, Modifier.weight(1f), enabled = vm.page > 0)
+            SecondaryButton("Назад", { vm.go(-1); scale = 1f; offset = Offset.Zero }, Modifier.weight(1f), enabled = vm.page > 0, singleLine = true)
             Text("${vm.page + 1} / ${vm.pageCount}", style = MaterialTheme.typography.bodyMedium, color = Palette.TextSecondary)
-            SecondaryButton("Дальше", { vm.go(1); scale = 1f; offset = Offset.Zero }, Modifier.weight(1f), enabled = vm.page < vm.pageCount - 1)
+            SecondaryButton("Дальше", { vm.go(1); scale = 1f; offset = Offset.Zero }, Modifier.weight(1f), enabled = vm.page < vm.pageCount - 1, singleLine = true)
         }
     }
 }

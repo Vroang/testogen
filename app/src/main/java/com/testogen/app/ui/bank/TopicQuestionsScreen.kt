@@ -93,8 +93,8 @@ fun TopicQuestionsScreen(
             }
             item(key = "actions") {
                 Row(Modifier.fillMaxWidth().padding(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PrimaryButton("Ещё", { onGenerateMore(title) }, Modifier.weight(1f), icon = AppIcons.Sparkle)
-                    SecondaryButton("Вручную", { onAddManual(title) }, Modifier.weight(1f), icon = Icons.Filled.Edit)
+                    PrimaryButton("Ещё", { onGenerateMore(title) }, Modifier.weight(1f), icon = AppIcons.Sparkle, singleLine = true)
+                    SecondaryButton("Вручную", { onAddManual(title) }, Modifier.weight(1f), icon = Icons.Filled.Edit, singleLine = true)
                 }
             }
             itemsIndexed(list, key = { _, q -> q.id }, contentType = { _, _ -> "question" }) { i, q ->

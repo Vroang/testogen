@@ -140,7 +140,8 @@ fun TextbookScreen(
     var editing by remember { mutableStateOf<TextbookSectionEntity?>(null) }
     var editingBook by remember { mutableStateOf(false) }
     val list = sections.orEmpty()
-    val paragraphs = list.count { it.kind == 0 }
+    // По номерам: сдвоенный «§ 2–3» считается за два параграфа
+    val paragraphs = list.filter { it.kind == 0 }.sumOf { s -> s.numFrom?.let { from -> s.numTo?.takeIf { it > from }?.let { it - from + 1 } } ?: 1 }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().imePadding(),
