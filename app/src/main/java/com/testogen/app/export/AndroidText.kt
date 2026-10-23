@@ -61,6 +61,8 @@ class AndroidText(context: Context) : TextMeasurer {
 sealed interface DrawItem {
     data class Line(val x: Float, val baseline: Float, val text: String, val bold: Boolean, val size: Float, val center: Boolean = false, val width: Float = 0f) : DrawItem
     data class DashedRect(val x: Float, val y: Float, val width: Float, val height: Float) : DrawItem
+    /** Отрезок: рамка таблицы ответов (серая сплошная) или линия отреза над ней (пунктир). */
+    data class Segment(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val dashed: Boolean) : DrawItem
 }
 
 class PreviewPage(val width: Float, val height: Float, val items: List<DrawItem>)
@@ -77,7 +79,7 @@ fun buildPreview(pages: List<Paginator.Page>, layout: DocLayout, text: AndroidTe
     }
     for (b in page.blocks) {
         when (b) {
-            is Paginator.PlacedTitle -> items += DrawItem.Line(b.x, b.y + baseline, Paginator.titleText(b.variant, b.continued), bold = true, size = size, center = true, width = b.width)
+            is Paginator.PlacedTitle -> items += DrawItem.Line(b.x, b.y + baseline, Paginator.titleText(b.variant), bold = true, size = size, center = true, width = b.width)
             is Paginator.PlacedQuestion -> {
                 var y = b.y + if (b.atTop) 0f else Paginator.spacingBeforeQuestion(layout)
                 for (line in text.breakLines("${b.question.number}. ${b.question.text}", b.width, size, true)) {
@@ -95,5 +97,44 @@ fun buildPreview(pages: List<Paginator.Page>, layout: DocLayout, text: AndroidTe
             }
         }
     }
+    for (t in page.answers) answerTable(items, t, layout, baseline)
     PreviewPage(layout.pageWidth, layout.pageHeight, items)
+}
+
+/** Кусок таблицы ответов: так же, как его нарисует Word (поля ячеек по 2 пт, строки точной высоты). */
+private fun answerTable(items: MutableList<DrawItem>, t: Paginator.AnswerTable, layout: DocLayout, baseline: Float) {
+    val size = layout.fontSize
+    val pad = DocxBuilder.ANSWER_PAD / 20f
+    var k = 0
+    // Линии рамки — посередине своей толщины, над каждой строкой
+    fun lineY(row: Int) = t.y + Paginator.BORDER / 2 + row * t.pitch
+    if (t.title) {
+        if (t.cutLine) items += DrawItem.Segment(t.x, lineY(0), t.x + t.width, lineY(0), dashed = true)
+        items += DrawItem.Line(t.x, t.rowTop(k) + baseline, "Ответы", bold = true, size = size, center = true, width = t.width)
+        k++
+    }
+    val gridTop = lineY(k)
+    val bottom = lineY(t.rowCount)
+    // Шапка с номерами вопросов, затем строка на каждый вариант
+    items += DrawItem.Line(t.x + pad, t.rowTop(k) + baseline, DocxBuilder.ANSWER_HEADER, bold = true, size = size)
+    t.numbers.forEachIndexed { i, n ->
+        items += DrawItem.Line(t.x + t.firstWidth + i * t.cellWidth, t.rowTop(k) + baseline, "$n", bold = true, size = size, center = true, width = t.cellWidth)
+    }
+    k++
+    for (v in t.rows) {
+        items += DrawItem.Line(t.x + pad, t.rowTop(k) + baseline, "${v.number}", bold = true, size = size)
+        t.numbers.forEachIndexed { i, n ->
+            val q = v.questions.getOrNull(n - 1) ?: return@forEachIndexed
+            items += DrawItem.Line(t.x + t.firstWidth + i * t.cellWidth, t.rowTop(k) + baseline, "${q.correct + 1}", bold = false, size = size, center = true, width = t.cellWidth)
+        }
+        k++
+    }
+    for (row in (if (t.title) 1 else 0)..t.rowCount) {
+        items += DrawItem.Segment(t.x, lineY(row), t.x + t.width, lineY(row), dashed = false)
+    }
+    items += DrawItem.Segment(t.x, gridTop, t.x, bottom, dashed = false)
+    for (i in 0..t.numbers.size) {
+        val x = t.x + t.firstWidth + i * t.cellWidth
+        items += DrawItem.Segment(x, gridTop, x, bottom, dashed = false)
+    }
 }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,6 +56,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.testogen.app.AppContainer
 import com.testogen.app.BuildConfig
 import com.testogen.app.export.AndroidText
+import com.testogen.app.export.AnswersPlacement
 import com.testogen.app.export.DocLayout
 import com.testogen.app.export.DocQuestion
 import com.testogen.app.export.DocVariant
@@ -66,6 +68,7 @@ import com.testogen.app.export.PreviewPage
 import com.testogen.app.export.buildPreview
 import com.testogen.app.export.layoutJson
 import com.testogen.app.ui.LocalAppContainer
+import com.testogen.app.ui.components.AppTextField
 import com.testogen.app.ui.components.BackHeader
 import com.testogen.app.ui.components.BottomPanel
 import com.testogen.app.ui.components.ChoicePill
@@ -80,6 +83,9 @@ import com.testogen.app.ui.theme.LocalDimens
 import com.testogen.app.ui.theme.Palette
 import com.testogen.app.util.plural
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -104,6 +110,8 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
     var busy by mutableStateOf(true)
         private set
     var message by mutableStateOf<String?>(null)
+    /** Название файла, которое мама может поменять; по умолчанию — название теста и дата. */
+    var fileTitle by mutableStateOf("")
     private var autoLayout: DocLayout? = null
     private var job: Job? = null
 
@@ -111,6 +119,7 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
         viewModelScope.launch {
             val test = c.database.tests().get(testId) ?: return@launch
             title = test.title
+            fileTitle = "${test.title.trim().take(60).trim()} — ${SimpleDateFormat("dd.MM.yyyy", Locale("ru")).format(Date())}"
             val items = c.database.tests().items(testId)
             val questions = c.database.questions().observeForTest(testId).first().associateBy { it.id }
             variants = items.groupBy { it.variant }.toSortedMap().map { (v, list) ->
@@ -124,7 +133,8 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
             val auto = withContext(Dispatchers.Default) { paginator.auto(variants) }
             autoLayout = auto
             val saved = test.layoutJson?.let { runCatching { json.decodeFromString(DocLayout.serializer(), it) }.getOrNull() }
-            apply(saved ?: auto, save = false)
+            // Сохранено только место ответов — раскладка остаётся автоматической
+            apply(if (saved == null) auto else if (saved.auto) auto.copy(answers = saved.answers) else saved, save = false)
         }
     }
 
@@ -137,7 +147,10 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
             delay(120)
             pages = withContext(Dispatchers.Default) { buildPreview(paginator.paginate(variants, newLayout), newLayout, text) }
             busy = false
-            if (save) c.database.tests().setLayout(testId, if (newLayout.auto) null else json.encodeToString(DocLayout.serializer(), newLayout))
+            if (save) {
+                val keep = !newLayout.auto || newLayout.answers != AnswersPlacement.SEPARATE
+                c.database.tests().setLayout(testId, if (keep) json.encodeToString(DocLayout.serializer(), newLayout) else null)
+            }
         }
     }
 
@@ -147,13 +160,27 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
     }
 
     fun resetAuto() {
-        autoLayout?.let { apply(it) }
+        autoLayout?.let { apply(it.copy(answers = layout?.answers ?: AnswersPlacement.SEPARATE)) }
     }
+
+    /** Место ответов — отдельная настройка: «как предлагает приложение» её не сбрасывает. */
+    fun setAnswers(placement: AnswersPlacement) {
+        val l = layout ?: return
+        apply(l.copy(answers = placement))
+    }
+
+    val answersInside get() = (layout?.answers ?: AnswersPlacement.SEPARATE) != AnswersPlacement.SEPARATE
 
     fun testBytes() = DocxBuilder.test(title, variants, layout ?: autoLayout!!, paginator)
     fun answersBytes() = DocxBuilder.answers(title, variants)
 
-    fun fileName(kind: String) = "${title.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(60)} — $kind.docx"
+    /** Имя без запрещённых в именах файлов знаков; буквы не меняются — кириллица остаётся кириллицей. */
+    private fun baseName(): String =
+        fileTitle.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").replace(Regex("\\s+"), " ").trim().trimEnd('.').take(120).trim()
+            .ifEmpty { title.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(60).ifEmpty { "Тест" } }
+
+    fun testFileName() = "${baseName()}.docx"
+    fun answersFileName() = "${baseName()} — ответы.docx"
 
     fun saveTo(context: android.content.Context, uri: Uri, answers: Boolean) = viewModelScope.launch {
         message = try {
@@ -161,29 +188,33 @@ class ExportViewModel(private val c: AppContainer, private val testId: Long, con
                 val bytes = if (answers) answersBytes() else testBytes()
                 context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("нет доступа")
             }
-            if (answers) "Файл с ответами сохранён" else "Файл теста сохранён"
+            if (answers) "Сохранён файл «${answersFileName()}»" else "Сохранён файл «${testFileName()}»"
         } catch (e: Exception) {
             "Не получилось сохранить: ${e.message}"
         }
     }
 
-    /** Оба файла — через «Поделиться» (почта, мессенджер, диск…). */
+    /** Файлы — через «Поделиться» (почта, мессенджер, диск…): тест и ответы или один файл, если ответы внутри. */
     fun share(context: android.content.Context) = viewModelScope.launch {
         try {
+            val single = answersInside
             val uris = withContext(Dispatchers.IO) {
                 val dir = File(context.cacheDir, "shared").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-                val test = File(dir, fileName("тест")).apply { writeBytes(testBytes()) }
-                val answers = File(dir, fileName("ответы")).apply { writeBytes(answersBytes()) }
+                val files = mutableListOf(File(dir, testFileName()).apply { writeBytes(testBytes()) })
+                if (!single) files += File(dir, answersFileName()).apply { writeBytes(answersBytes()) }
                 // Только для проверки разработчиком: раскладка предпросмотра для сверки с LibreOffice (tools/layout_check.py)
                 if (BuildConfig.DEBUG) layout?.let { File(dir, "layout.json").writeText(layoutJson(paginator.paginate(variants, it), it)) }
-                arrayListOf(test, answers).map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) }
+                files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) }
             }
-            val intent = Intent(Intent.ACTION_SEND_MULTIPLE)
+            val intent = if (single) {
+                Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
+            } else {
+                Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+            }
                 .setType("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
                 .putExtra(Intent.EXTRA_SUBJECT, title)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            context.startActivity(Intent.createChooser(intent, "Отправить тест и ответы"))
+            context.startActivity(Intent.createChooser(intent, if (single) "Отправить тест" else "Отправить тест и ответы"))
         } catch (e: Exception) {
             message = "Не получилось подготовить файлы: ${e.message}"
         }
@@ -202,7 +233,7 @@ fun ExportScreen(testId: Long, onBack: () -> Unit) {
     val layout = vm.layout
     var zoomed by remember { mutableStateOf<PreviewPage?>(null) }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().imePadding()) {
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(bottom = 20.dp),
@@ -215,6 +246,9 @@ fun ExportScreen(testId: Long, onBack: () -> Unit) {
                 } else {
                     LayoutCard(layout, vm, Modifier.padding(horizontal = pad))
                 }
+            }
+            item(key = "file") {
+                if (layout != null) FileCard(vm, Modifier.padding(horizontal = pad))
             }
             item(key = "label") {
                 Text(
@@ -230,11 +264,19 @@ fun ExportScreen(testId: Long, onBack: () -> Unit) {
         }
         BottomPanel {
             vm.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Palette.Primary) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton("Скачать тест", { saveTest.launch(vm.fileName("тест")) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
-                SecondaryButton("Ответы", { saveAnswers.launch(vm.fileName("ответы")) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
+            if (vm.answersInside) {
+                // Ответы внутри файла теста — один файл: скачать или отправить
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryButton("Скачать тест", { saveTest.launch(vm.testFileName()) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
+                    SecondaryButton("Отправить", { vm.share(context) }, Modifier.weight(1f), icon = AppIcons.Document, enabled = layout != null, singleLine = true)
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryButton("Скачать тест", { saveTest.launch(vm.testFileName()) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
+                    SecondaryButton("Ответы", { saveAnswers.launch(vm.answersFileName()) }, Modifier.weight(1f), enabled = layout != null, singleLine = true)
+                }
+                SecondaryButton("Отправить оба файла", { vm.share(context) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, enabled = layout != null, singleLine = true)
             }
-            SecondaryButton("Отправить оба файла", { vm.share(context) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, enabled = layout != null, singleLine = true)
         }
     }
 
@@ -338,6 +380,31 @@ private fun LayoutCard(layout: DocLayout, vm: ExportViewModel, modifier: Modifie
     }
 }
 
+/** Где ответы и как назвать файл. */
+@Composable
+private fun FileCard(vm: ExportViewModel, modifier: Modifier = Modifier) {
+    val answers = vm.layout?.answers ?: AnswersPlacement.SEPARATE
+    SoftCard(modifier.fillMaxWidth()) {
+        Text("Ответы", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoicePill("Отдельным файлом", answers == AnswersPlacement.SEPARATE, { vm.setAnswers(AnswersPlacement.SEPARATE) }, Modifier.fillMaxWidth(), singleLine = false)
+            ChoicePill("В конце теста, под линией отреза", answers == AnswersPlacement.END, { vm.setAnswers(AnswersPlacement.END) }, Modifier.fillMaxWidth(), singleLine = false)
+            ChoicePill("В конце теста, на отдельной странице", answers == AnswersPlacement.NEW_PAGE, { vm.setAnswers(AnswersPlacement.NEW_PAGE) }, Modifier.fillMaxWidth(), singleLine = false)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Название файла", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        AppTextField(vm.fileTitle, { vm.fileTitle = it }, placeholder = "Например: Государство, 9 класс", singleLine = true)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (vm.answersInside) vm.testFileName() else "${vm.testFileName()}\n${vm.answersFileName()}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Palette.TextSecondary,
+        )
+    }
+}
+
 /** Страница предпросмотра: белый лист с тенью, текст шрифтом, совпадающим с Times New Roman. */
 @Composable
 private fun PageView(page: PreviewPage, number: Int, modifier: Modifier = Modifier) {
@@ -357,6 +424,14 @@ private fun PageView(page: PreviewPage, number: Int, modifier: Modifier = Modifi
             pathEffect = DashPathEffect(floatArrayOf(3f, 2f), 0f)
         }
         Triple(regular, bold, dash)
+    }
+    // Рамка таблицы ответов — сплошная серая, как в файле
+    val grid = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = android.graphics.Color.rgb(140, 140, 140)
+            strokeWidth = 0.75f
+        }
     }
     Column(modifier) {
         Canvas(
@@ -382,6 +457,7 @@ private fun PageView(page: PreviewPage, number: Int, modifier: Modifier = Modifi
                             canvas.drawText(item.text, x, item.baseline, paint)
                         }
                         is DrawItem.DashedRect -> canvas.drawRect(item.x, item.y, item.x + item.width, item.y + item.height, paints.third)
+                        is DrawItem.Segment -> canvas.drawLine(item.x1, item.y1, item.x2, item.y2, if (item.dashed) paints.third else grid)
                     }
                 }
                 canvas.restore()

@@ -1,13 +1,16 @@
 package com.testogen.app.export
 
+import kotlin.math.floor
+
 /**
  * Раскладка теста по страницам — та же логика, по которой Word раскладывает созданный файл:
  * в режиме «несколько на листе» варианты — ячейки таблицы, строка таблицы не разрывается,
- * каждая страница — отдельная таблица; ряд вариантов выше страницы режется по вопросам на куски
- * («Вариант N (продолжение)» на следующей странице);
+ * каждая страница — отдельная таблица; ряд вариантов выше страницы режется по вопросам на куски,
+ * на следующей странице вариант продолжается без нового заголовка;
  * в режиме «вариант на странице» вариант начинается с новой страницы и течёт по колонкам,
  * вопрос вместе со своими вариантами ответа не разрывается.
- * Результат нужен и для предпросмотра, и для автоматического выбора раскладки.
+ * Ответы в том же файле — таблицы после теста (под линией отреза или с новой страницы), разрывы между
+ * их кусками ставятся явно. Результат нужен и для предпросмотра, и для файла, и для автоматического выбора раскладки.
  */
 class Paginator(private val measurer: TextMeasurer) {
 
@@ -19,16 +22,15 @@ class Paginator(private val measurer: TextMeasurer) {
         val height: Float
     }
 
-    /** [continued] — заголовок куска, продолжающего вариант с прошлой страницы. */
     data class PlacedTitle(
         val variant: Int,
         override val x: Float,
         override val y: Float,
         override val width: Float,
         override val height: Float,
-        val continued: Boolean = false,
     ) : Placed
-    /** [atTop] — вопрос в начале колонки после автоматического перехода: отступ перед ним Word не ставит. */
+
+    /** [atTop] — вопрос в начале колонки или куска варианта: отступа перед ним нет. */
     data class PlacedQuestion(
         val question: DocQuestion,
         override val x: Float,
@@ -41,13 +43,48 @@ class Paginator(private val measurer: TextMeasurer) {
     /** Ячейка таблицы с вариантом (только для режима «несколько на листе») — для рисования линий отреза. */
     data class Cell(val x: Float, val y: Float, val width: Float, val height: Float)
 
-    data class Page(val blocks: List<Placed>, val cells: List<Cell>)
+    data class Page(val blocks: List<Placed>, val cells: List<Cell>, val answers: List<AnswerTable> = emptyList())
 
-    /** Кусок варианта в ячейке таблицы; [continued] — продолжение варианта с прошлой страницы. */
+    /** Кусок варианта в ячейке таблицы; [continued] — продолжение варианта с прошлой страницы (без заголовка). */
     data class CellPart(val variant: Int, val questions: List<DocQuestion>, val continued: Boolean)
 
     /** Строка таблицы «несколько на листе»: по куску на колонку (null — пустая ячейка). */
     data class TableRow(val parts: List<CellPart?>, val height: Float)
+
+    /**
+     * Кусок таблицы ответов: колонки — номера вопросов [numbers], строки — варианты [rows].
+     * [title] — строка «Ответы» сверху (только у первого куска), [cutLine] — над ней пунктир отреза.
+     */
+    data class AnswerTable(
+        val x: Float,
+        val y: Float,
+        val firstWidth: Float,
+        val cellWidth: Float,
+        val lineHeight: Float,
+        val numbers: List<Int>,
+        val rows: List<DocVariant>,
+        val title: Boolean,
+        val cutLine: Boolean,
+    ) {
+        val width get() = firstWidth + cellWidth * numbers.size
+        val rowCount get() = (if (title) 1 else 0) + 1 + rows.size
+        /** Шаг строк: рамка над строкой входит в её высоту (так раскладывает LibreOffice). */
+        val pitch get() = lineHeight + BORDER
+        val height get() = rowCount * pitch + BORDER
+        /** Верх текста в строке [k] (0 — первая строка куска). */
+        fun rowTop(k: Int) = y + BORDER + k * pitch
+    }
+
+    enum class Break { NONE, COLUMN, PAGE }
+
+    /** Что идёт в файле после теста: пустой абзац высотой [height] (с разрывом колонки/страницы или без) или таблица. */
+    sealed interface AnswerItem {
+        data class Spacer(val height: Float, val brk: Break) : AnswerItem
+        data class Table(val table: AnswerTable) : AnswerItem
+    }
+
+    /** Полная раскладка: страницы для предпросмотра и то, что нужно файлу. */
+    class Result(val pages: List<Page>, val compactRows: List<List<TableRow>>, val answerItems: List<AnswerItem>)
 
     // ---------- размеры блоков ----------
 
@@ -64,14 +101,32 @@ class Paginator(private val measurer: TextMeasurer) {
 
     // ---------- раскладка ----------
 
-    fun paginate(variants: List<DocVariant>, l: DocLayout): List<Page> =
-        if (l.mode == LayoutMode.COMPACT) compact(variants, l) else perPage(variants, l)
+    fun paginate(variants: List<DocVariant>, l: DocLayout): List<Page> = layout(variants, l).pages
 
-    private fun partHeight(p: CellPart, l: DocLayout): Float =
-        titleHeight(l) + p.questions.sumOf { questionHeight(it, l).toDouble() }.toFloat()
+    fun layout(variants: List<DocVariant>, l: DocLayout): Result {
+        val rows = if (l.mode == LayoutMode.COMPACT) compactPages(variants, l) else emptyList()
+        val (pages, end) = if (l.mode == LayoutMode.COMPACT) compact(rows, l) else perPage(variants, l)
+        if (l.answers == AnswersPlacement.SEPARATE || variants.isEmpty()) return Result(pages, rows, emptyList())
+        val flow = AnswerFlow(l, pages.size, end)
+        flow.place(variants)
+        val withAnswers = List(flow.pageCount) { i ->
+            val page = pages.getOrNull(i) ?: Page(emptyList(), emptyList())
+            page.copy(answers = flow.tables[i].orEmpty())
+        }
+        return Result(withAnswers, rows, flow.items)
+    }
+
+    /** Высота куска варианта: у продолжения нет заголовка и отступа перед первым вопросом. */
+    private fun partHeight(p: CellPart, l: DocLayout): Float {
+        val questions = p.questions.sumOf { questionHeight(it, l).toDouble() }.toFloat()
+        return if (p.continued) questions - (if (p.questions.isEmpty()) 0f else spacingBeforeQuestion(l)) else titleHeight(l) + questions
+    }
+
+    /** Толщина рамки таблицы «несколько на листе»: линии отреза есть — над каждой строкой и под последней. */
+    private fun border(l: DocLayout) = if (l.cutLines) BORDER else 0f
 
     private fun rowHeight(parts: List<CellPart?>, l: DocLayout): Float =
-        parts.maxOf { p -> p?.let { partHeight(it, l) } ?: l.lineHeight } + 2 * l.cellPadding
+        parts.maxOf { p -> p?.let { partHeight(it, l) } ?: l.lineHeight } + 2 * l.cellPadding + border(l)
 
     /** Сколько места под таблицу на странице «несколько на листе»: за вычетом служебных абзацев до и после неё. */
     fun compactAvailable(l: DocLayout) = l.contentHeight - 2 * SEPARATOR
@@ -85,12 +140,13 @@ class Paginator(private val measurer: TextMeasurer) {
         val avail = compactAvailable(l)
         val pages = mutableListOf<List<TableRow>>()
         var page = mutableListOf<TableRow>()
-        var used = 0f
+        // Нижняя рамка таблицы
+        var used = border(l)
         fun newPage() {
             if (page.isEmpty()) return
             pages += page
             page = mutableListOf()
-            used = 0f
+            used = border(l)
         }
         fun add(parts: List<CellPart?>) {
             val padded = List(l.columns) { parts.getOrNull(it) }
@@ -100,13 +156,13 @@ class Paginator(private val measurer: TextMeasurer) {
         }
         for (group in variants.chunked(l.columns)) {
             val whole = group.map { CellPart(it.number, it.questions, continued = false) }
-            if (rowHeight(whole, l) <= avail + DocLayout.EPS) {
+            if (rowHeight(whole, l) + border(l) <= avail + DocLayout.EPS) {
                 if (used + rowHeight(whole, l) > avail + DocLayout.EPS) newPage()
                 add(whole)
                 continue
             }
             newPage()
-            val pieces = group.map { split(it, avail - 2 * l.cellPadding, l) }
+            val pieces = group.map { split(it, avail - 2 * l.cellPadding - 2 * border(l), l) }
             for (k in 0 until pieces.maxOf { it.size }) {
                 if (k > 0) newPage()
                 add(pieces.map { it.getOrNull(k) })
@@ -116,7 +172,7 @@ class Paginator(private val measurer: TextMeasurer) {
         return pages
     }
 
-    /** Вариант по кускам высотой не больше [capacity]; вопрос не разрывается. */
+    /** Вариант по кускам высотой не больше [capacity]; вопрос не разрывается, у продолжения нет заголовка. */
     private fun split(v: DocVariant, capacity: Float, l: DocLayout): List<CellPart> {
         val parts = mutableListOf<CellPart>()
         var current = mutableListOf<DocQuestion>()
@@ -126,7 +182,7 @@ class Paginator(private val measurer: TextMeasurer) {
             if (h + qh > capacity + DocLayout.EPS && current.isNotEmpty()) {
                 parts += CellPart(v.number, current, continued = parts.isNotEmpty())
                 current = mutableListOf()
-                h = titleHeight(l)
+                h = -spacingBeforeQuestion(l)
             }
             current += q
             h += qh
@@ -135,32 +191,45 @@ class Paginator(private val measurer: TextMeasurer) {
         return parts
     }
 
-    private fun compact(variants: List<DocVariant>, l: DocLayout): List<Page> = compactPages(variants, l).map { rows ->
-        val blocks = mutableListOf<Placed>()
-        val cells = mutableListOf<Cell>()
-        var y = l.margin + SEPARATOR
-        for (row in rows) {
-            row.parts.forEachIndexed { i, part ->
-                val x = l.margin + i * l.columnWidth
-                cells += Cell(x, y, l.columnWidth, row.height)
-                if (part == null) return@forEachIndexed
-                var cy = y + l.cellPadding
-                val tx = x + l.cellPadding
-                blocks += PlacedTitle(part.variant, tx, cy, l.textWidth, titleHeight(l), part.continued)
-                cy += titleHeight(l)
-                for (q in part.questions) {
-                    val h = questionHeight(q, l)
-                    blocks += PlacedQuestion(q, tx, cy, l.textWidth, h)
-                    cy += h
+    /** Где закончился тест: страница, колонка, высота. */
+    private data class Cursor(val page: Int, val column: Int, val y: Float)
+
+    private fun compact(rows: List<List<TableRow>>, l: DocLayout): Pair<List<Page>, Cursor> {
+        var endY = l.margin + SEPARATOR
+        val pages = rows.map { pageRows ->
+            val blocks = mutableListOf<Placed>()
+            val cells = mutableListOf<Cell>()
+            var y = l.margin + SEPARATOR
+            for (row in pageRows) {
+                row.parts.forEachIndexed { i, part ->
+                    val x = l.margin + i * l.columnWidth
+                    // Линия рамки — посередине своей толщины
+                    cells += Cell(x, y + border(l) / 2, l.columnWidth, row.height)
+                    if (part == null) return@forEachIndexed
+                    var cy = y + border(l) + l.cellPadding
+                    val tx = x + l.cellPadding
+                    if (!part.continued) {
+                        blocks += PlacedTitle(part.variant, tx, cy, l.textWidth, titleHeight(l))
+                        cy += titleHeight(l)
+                    }
+                    part.questions.forEachIndexed { qi, q ->
+                        val top = part.continued && qi == 0
+                        val h = questionHeight(q, l) - if (top) spacingBeforeQuestion(l) else 0f
+                        blocks += PlacedQuestion(q, tx, cy, l.textWidth, h, atTop = top)
+                        cy += h
+                    }
                 }
+                y += row.height
             }
-            y += row.height
+            endY = y + border(l)
+            Page(blocks, cells)
         }
-        Page(blocks, cells)
+        return pages to Cursor(pages.lastIndex.coerceAtLeast(0), 0, endY)
     }
 
-    private fun perPage(variants: List<DocVariant>, l: DocLayout): List<Page> {
+    private fun perPage(variants: List<DocVariant>, l: DocLayout): Pair<List<Page>, Cursor> {
         val pages = mutableListOf<Page>()
+        var end = Cursor(0, 0, l.margin)
         for (v in variants) {
             var blocks = mutableListOf<Placed>()
             var column = 0
@@ -190,12 +259,105 @@ class Paginator(private val measurer: TextMeasurer) {
                 y += h
             }
             pages += Page(blocks, emptyList())
+            end = Cursor(pages.lastIndex, column, y)
         }
-        return pages
+        return pages to end
+    }
+
+    /**
+     * Ответы после теста. Течёт как текст: в режиме «вариант на странице» — по колонкам, иначе — по страницам.
+     * Каждый переход в новую колонку или на новую страницу — явный разрыв в служебном абзаце высотой
+     * [SEPARATOR]; под самым низом колонки всегда остаётся место на такой абзац.
+     */
+    private inner class AnswerFlow(private val l: DocLayout, existingPages: Int, start: Cursor) {
+        val items = mutableListOf<AnswerItem>()
+        val tables = HashMap<Int, MutableList<AnswerTable>>()
+        var pageCount = existingPages
+            private set
+        private var page = start.page
+        private var column = start.column
+        private var y = start.y
+        private val columns = if (l.mode == LayoutMode.PER_PAGE) l.columns else 1
+        private val width = if (l.mode == LayoutMode.PER_PAGE) l.columnWidth else l.contentWidth
+        private val top = l.margin
+        private val limit = l.margin + l.contentHeight - SEPARATOR
+        private val rh = DocLayout.lineHeight(l.fontSize)
+
+        private fun x() = l.margin + column * (l.columnWidth + l.columnGap)
+
+        private fun next() {
+            // Меньше места, чем на служебный абзац: он сам уйдёт в следующую колонку, разрыв не нужен
+            val brk = when {
+                y > limit + DocLayout.EPS -> Break.NONE
+                column + 1 < columns -> Break.COLUMN
+                else -> Break.PAGE
+            }
+            if (column + 1 < columns) {
+                column++
+            } else {
+                column = 0
+                page++
+            }
+            pageCount = maxOf(pageCount, page + 1)
+            items += AnswerItem.Spacer(SEPARATOR, brk)
+            y = top + SEPARATOR
+        }
+
+        private fun newPage() {
+            column = 0
+            page++
+            pageCount = maxOf(pageCount, page + 1)
+            items += AnswerItem.Spacer(SEPARATOR, Break.PAGE)
+            y = top + SEPARATOR
+        }
+
+        fun place(variants: List<DocVariant>) {
+            if (l.answers == AnswersPlacement.NEW_PAGE) {
+                newPage()
+            } else if (y + END_GAP <= limit + DocLayout.EPS) {
+                items += AnswerItem.Spacer(END_GAP, Break.NONE)
+                y += END_GAP
+            } else {
+                next()
+            }
+            val firstWidth = DocLayout.twips(l.fontSize * 3.2f)
+            val maxQ = variants.maxOf { it.questions.size }.coerceAtLeast(1)
+            val perRow = floor((width - firstWidth) / (l.fontSize * 2.1f)).toInt().coerceIn(1, MAX_ANSWER_COLUMNS).coerceAtMost(maxQ)
+            val cellWidth = floor((width - firstWidth) / perRow * 20) / 20f
+            var first = true
+            (1..maxQ).chunked(perRow).forEachIndexed { ci, numbers ->
+                if (ci > 0) {
+                    val gap = rh / 2
+                    if (y + gap + 3 * (rh + BORDER) + BORDER <= limit + DocLayout.EPS) {
+                        items += AnswerItem.Spacer(gap, Break.NONE)
+                        y += gap
+                    } else {
+                        next()
+                    }
+                }
+                var r = 0
+                while (r < variants.size) {
+                    // Строка «Ответы» (у первого куска) и шапка с номерами, затем строки вариантов; каждая — с рамкой над ней
+                    val head = ((if (first) 2 else 1)) * (rh + BORDER) + BORDER
+                    if (y + head + rh + BORDER > limit + DocLayout.EPS) next()
+                    val n = floor((limit + DocLayout.EPS - y - head) / (rh + BORDER)).toInt().coerceIn(1, variants.size - r)
+                    val t = AnswerTable(
+                        x(), y, firstWidth, cellWidth, rh, numbers, variants.subList(r, r + n),
+                        title = first, cutLine = first && l.answers == AnswersPlacement.END,
+                    )
+                    items += AnswerItem.Table(t)
+                    tables.getOrPut(page) { mutableListOf() } += t
+                    y += t.height
+                    r += n
+                    first = false
+                    if (r < variants.size) next()
+                }
+            }
+        }
     }
 
     /** Сколько страниц займёт вариант. */
-    fun pagesFor(v: DocVariant, l: DocLayout) = perPage(listOf(v), l).size
+    fun pagesFor(v: DocVariant, l: DocLayout) = perPage(listOf(v), l).first.size
 
     // ---------- автоматический выбор ----------
 
@@ -209,7 +371,7 @@ class Paginator(private val measurer: TextMeasurer) {
         // Проверяем по самым длинным вариантам — остальные короче
         val longest = variants.sortedByDescending { v -> v.questions.sumOf { q -> q.text.length + q.options.sumOf { it.length } } }.take(3)
         val compact = DocLayout(LayoutMode.COMPACT, landscape = true, columns = 2, fontSize = 10f)
-        if (variants.size > 1 && longest.all { variantHeight(it, compact) + 2 * compact.cellPadding <= compactAvailable(compact) }) {
+        if (variants.size > 1 && longest.all { variantHeight(it, compact) + 2 * compact.cellPadding + 2 * BORDER <= compactAvailable(compact) }) {
             return compact
         }
         val candidates = listOf(
@@ -225,10 +387,19 @@ class Paginator(private val measurer: TextMeasurer) {
     }
 
     companion object {
-        /** Высота служебного пустого абзаца перед каждой таблицей «несколько на листе» и после последней. */
+        /** Высота служебного пустого абзаца: перед каждой таблицей «несколько на листе», после последней, в разрывах ответов. */
         const val SEPARATOR = 1f
 
-        fun titleText(variant: Int, continued: Boolean) = if (continued) "Вариант $variant (продолжение)" else "Вариант $variant"
+        /** Толщина рамки таблицы (w:sz=6 — 6/8 пт): LibreOffice прибавляет её к высоте строки. */
+        const val BORDER = 0.75f
+
+        /** Отступ от теста до линии отреза с ответами. */
+        const val END_GAP = 24f
+
+        /** Больше номеров вопросов в одной строке таблицы ответов не ставится. */
+        const val MAX_ANSWER_COLUMNS = 20
+
+        fun titleText(variant: Int) = "Вариант $variant"
 
         // Отступа после заголовка нет: Word и LibreOffice по-разному складывают «после» и «перед» соседних абзацев,
         // поэтому промежуток между заголовком и первым вопросом задаёт только отступ перед вопросом

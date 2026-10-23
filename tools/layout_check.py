@@ -55,6 +55,9 @@ def check(name, folder, png):
                 continue
             if b["kind"] == "title":
                 ok = t == want and b["x"] - 2 <= x0 <= b["x"] + b["width"]
+            elif b["kind"] == "cell":
+                # Ячейка таблицы ответов: соседние ячейки строки PDF может склеить в одну строку текста
+                ok = (t == want or t.startswith(want + " ")) and b["x"] - 2 <= x0 <= b["x"] + b["width"]
             else:
                 ok = t.startswith(prefix) and abs(x0 - b["x"]) < 6
             if ok:

@@ -8,6 +8,10 @@ import kotlin.math.roundToInt
 @Serializable
 enum class LayoutMode { COMPACT, PER_PAGE }
 
+/** Где ответы: отдельным файлом, в конце теста под линией отреза или в конце теста с новой страницы. */
+@Serializable
+enum class AnswersPlacement { SEPARATE, END, NEW_PAGE }
+
 /** Настройки файла теста; [auto] — выбраны приложением, мама может поменять. */
 @Serializable
 data class DocLayout(
@@ -17,6 +21,7 @@ data class DocLayout(
     val fontSize: Float,
     val cutLines: Boolean = true,
     val auto: Boolean = true,
+    val answers: AnswersPlacement = AnswersPlacement.SEPARATE,
 ) {
     /** Лист A4 в пунктах. */
     val pageWidth get() = if (landscape) A4_LONG else A4_SHORT

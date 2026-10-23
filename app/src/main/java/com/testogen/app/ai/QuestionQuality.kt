@@ -100,9 +100,14 @@ object QuestionQuality {
             """(?:\s+(?:учебника|параграфа|выше)|(?=\s*[,?.!:;]|\s+$VERB))(?:\s*,)?(?=[\s?.!,:;]|$)""",
     )
 
+    /** «Какое утверждение … соответствует тексту учебника?» → «Какое утверждение … верно?» */
+    private val MATCHES_TEXT = Regex(
+        """(?iu)(?<!\p{L})(?:соответствует|согласуется\s+с|не\s+противоречит)\s+(?:(?:тексту|текстом|содержанию|содержанием)(?:\s+(?:учебника|параграфа))?|учебнику|учебником|параграфу|параграфом)(?!\p{L})""",
+    )
+
     /** Убирает «согласно тексту учебника», «в тексте» — для школьника в бумажном тесте они лишние. */
     fun stripSourceRefs(q: String): String {
-        val s = q.replace(SOURCE_REF, "")
+        val s = q.replace(MATCHES_TEXT, "верно").replace(SOURCE_REF, "")
             .replace(Regex("""\s+([?,.!:;])"""), "$1").replace(Regex("""\s{2,}"""), " ").trim()
             .removePrefix(",").trim()
         return s.replaceFirstChar { it.uppercaseChar() }

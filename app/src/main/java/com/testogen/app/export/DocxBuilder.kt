@@ -14,10 +14,21 @@ object DocxBuilder {
 
     private fun tw(pt: Float) = (pt * 20).roundToInt()
 
-    /** Файл теста с выбранной раскладкой; разбивку на страницы «несколько на листе» задаёт [paginator] — та же, что в предпросмотре. */
+    /**
+     * Файл теста с выбранной раскладкой; разбивку на страницы «несколько на листе» и место ответов в том же файле
+     * задаёт [paginator] — та же, что в предпросмотре.
+     */
     fun test(title: String, variants: List<DocVariant>, l: DocLayout, paginator: Paginator): ByteArray {
         val body = StringBuilder()
-        if (l.mode == LayoutMode.COMPACT) compactBody(body, paginator.compactPages(variants, l), l) else perPageBody(body, variants, l)
+        val layout = paginator.layout(variants, l)
+        if (l.mode == LayoutMode.COMPACT) compactBody(body, layout.compactRows, l) else perPageBody(body, variants, l)
+        if (layout.answerItems.isNotEmpty()) {
+            answerItems(body, layout.answerItems, l)
+            // После таблицы документ должен кончаться абзацем
+            body.append(separator(pageBreak = false))
+        } else if (l.mode == LayoutMode.COMPACT) {
+            body.append(separator(pageBreak = false))
+        }
         body.append(sectPr(l.landscape, l.margin, if (l.mode == LayoutMode.PER_PAGE) l.columns else 1, l.columnGap))
         return zip(title, document(body.toString()), styles(l.fontSize, l.lineHeight))
     }
@@ -84,7 +95,8 @@ object DocxBuilder {
                     if (part == null) {
                         content.append(paragraph("", size = l.fontSize, line = l.lineHeight))
                     } else {
-                        variantParagraphs(content, Paginator.titleText(part.variant, part.continued), part.questions, l, pageBreak = false)
+                        // Продолжение варианта на новой странице — без заголовка и без отступа перед первым вопросом
+                        variantParagraphs(content, if (part.continued) null else Paginator.titleText(part.variant), part.questions, l, pageBreak = false)
                     }
                     sb.append(tc(l.columnWidth, content.toString()))
                 }
@@ -92,33 +104,81 @@ object DocxBuilder {
             }
             sb.append("</w:tbl>")
         }
-        sb.append(separator(pageBreak = false))
     }
 
-    /** Пустой абзац высотой [Paginator.SEPARATOR] пунктов. */
-    private fun separator(pageBreak: Boolean) =
+    /** Пустой абзац высотой [height] пунктов; [columnBreak] — с разрывом колонки в начале. */
+    private fun separator(pageBreak: Boolean, height: Float = Paginator.SEPARATOR, columnBreak: Boolean = false) =
         "<w:p><w:pPr>" + (if (pageBreak) "<w:pageBreakBefore/>" else "") +
-            "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"${tw(Paginator.SEPARATOR)}\" w:lineRule=\"exact\"/>" +
-            "<w:rPr><w:sz w:val=\"2\"/><w:szCs w:val=\"2\"/></w:rPr></w:pPr></w:p>"
+            "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"${tw(height)}\" w:lineRule=\"exact\"/>" +
+            "<w:rPr><w:sz w:val=\"2\"/><w:szCs w:val=\"2\"/></w:rPr></w:pPr>" +
+            (if (columnBreak) "<w:r><w:rPr><w:sz w:val=\"2\"/><w:szCs w:val=\"2\"/></w:rPr><w:br w:type=\"column\"/></w:r>" else "") +
+            "</w:p>"
+
+    /** Ответы в файле теста: служебные абзацы и куски таблицы ровно там, где их поставил Paginator. */
+    private fun answerItems(sb: StringBuilder, items: List<Paginator.AnswerItem>, l: DocLayout) {
+        val size = l.fontSize
+        val line = DocLayout.lineHeight(size)
+        for (item in items) {
+            when (item) {
+                is Paginator.AnswerItem.Spacer -> sb.append(
+                    separator(pageBreak = item.brk == Paginator.Break.PAGE, height = item.height, columnBreak = item.brk == Paginator.Break.COLUMN),
+                )
+                is Paginator.AnswerItem.Table -> {
+                    val t = item.table
+                    sb.append("<w:tbl><w:tblPr><w:tblW w:w=\"${tw(t.width)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>")
+                    sb.append(borders("single", "8C8C8C"))
+                    sb.append("<w:tblCellMar><w:top w:w=\"0\" w:type=\"dxa\"/><w:left w:w=\"$ANSWER_PAD\" w:type=\"dxa\"/><w:bottom w:w=\"0\" w:type=\"dxa\"/><w:right w:w=\"$ANSWER_PAD\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>")
+                    sb.append("<w:gridCol w:w=\"${tw(t.firstWidth)}\"/>")
+                    t.numbers.forEach { _ -> sb.append("<w:gridCol w:w=\"${tw(t.cellWidth)}\"/>") }
+                    sb.append("</w:tblGrid>")
+                    if (t.title) {
+                        // Строка «Ответы»: сверху пунктир отреза (или ничего), по бокам рамки нет
+                        val top = if (t.cutLine) "<w:top w:val=\"dashed\" w:sz=\"6\" w:space=\"0\" w:color=\"8C8C8C\"/>" else "<w:top w:val=\"nil\"/>"
+                        sb.append("<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w=\"${tw(t.width)}\" w:type=\"dxa\"/><w:gridSpan w:val=\"${t.numbers.size + 1}\"/>")
+                        sb.append("<w:tcBorders>$top<w:left w:val=\"nil\"/><w:right w:val=\"nil\"/></w:tcBorders></w:tcPr>")
+                        sb.append(paragraph("Ответы", bold = true, size = size, line = line, center = true))
+                        sb.append("</w:tc></w:tr>")
+                    }
+                    sb.append("<w:tr><w:trPr><w:cantSplit/></w:trPr>")
+                    sb.append(tc(t.firstWidth, paragraph(ANSWER_HEADER, bold = true, size = size, line = line)))
+                    t.numbers.forEach { n -> sb.append(tc(t.cellWidth, paragraph("$n", bold = true, size = size, line = line, center = true), shade = true)) }
+                    sb.append("</w:tr>")
+                    for (v in t.rows) {
+                        sb.append("<w:tr><w:trPr><w:cantSplit/></w:trPr>")
+                        sb.append(tc(t.firstWidth, paragraph("${v.number}", bold = true, size = size, line = line)))
+                        t.numbers.forEach { n ->
+                            val q = v.questions.getOrNull(n - 1)
+                            sb.append(tc(t.cellWidth, paragraph(q?.let { "${it.correct + 1}" }.orEmpty(), size = size, line = line, center = true)))
+                        }
+                        sb.append("</w:tr>")
+                    }
+                    sb.append("</w:tbl>")
+                }
+            }
+        }
+    }
 
     private fun perPageBody(sb: StringBuilder, variants: List<DocVariant>, l: DocLayout) {
-        variants.forEachIndexed { i, v -> variantParagraphs(sb, Paginator.titleText(v.number, false), v.questions, l, pageBreak = i > 0) }
+        variants.forEachIndexed { i, v -> variantParagraphs(sb, Paginator.titleText(v.number), v.questions, l, pageBreak = i > 0) }
     }
 
-    private fun variantParagraphs(sb: StringBuilder, title: String, questions: List<DocQuestion>, l: DocLayout, pageBreak: Boolean) {
-        sb.append(
-            paragraph(
-                title,
-                bold = true,
-                size = l.fontSize,
-                line = l.lineHeight,
-                after = Paginator.spacingAfterTitle(l),
-                center = true,
-                keepNext = true,
-                pageBreakBefore = pageBreak,
-            ),
-        )
-        for (q in questions) {
+    /** [title] null — продолжение варианта: заголовка нет, у первого вопроса нет отступа перед ним. */
+    private fun variantParagraphs(sb: StringBuilder, title: String?, questions: List<DocQuestion>, l: DocLayout, pageBreak: Boolean) {
+        if (title != null) {
+            sb.append(
+                paragraph(
+                    title,
+                    bold = true,
+                    size = l.fontSize,
+                    line = l.lineHeight,
+                    after = Paginator.spacingAfterTitle(l),
+                    center = true,
+                    keepNext = true,
+                    pageBreakBefore = pageBreak,
+                ),
+            )
+        }
+        questions.forEachIndexed { qi, q ->
             // Вопрос и его варианты ответа держатся вместе
             sb.append(
                 paragraph(
@@ -126,7 +186,7 @@ object DocxBuilder {
                     bold = true,
                     size = l.fontSize,
                     line = l.lineHeight,
-                    before = Paginator.spacingBeforeQuestion(l),
+                    before = if (title == null && qi == 0) 0f else Paginator.spacingBeforeQuestion(l),
                     keepNext = true,
                 ),
             )
@@ -296,4 +356,9 @@ object DocxBuilder {
 
     /** Сколько номеров вопросов в одной строке таблицы ответов. */
     const val ANSWER_COLUMNS = 20
+
+    /** Поле слева и справа в ячейке таблицы ответов в файле теста, twips (2 пт). */
+    const val ANSWER_PAD = 40
+
+    const val ANSWER_HEADER = "Вар."
 }

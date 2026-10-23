@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Только debug-сборка: демо праздничного экрана (этап 8), запуск из adb:
+     am start -n com.testogen.app/.debug.CelebrationDemoActivity -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".debug.CelebrationDemoActivity"
+            android:exported="true"
+            android:theme="@style/Theme.TestoGen" />
+    </application>
+</manifest>

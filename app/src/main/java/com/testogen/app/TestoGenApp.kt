@@ -5,7 +5,7 @@ import com.testogen.app.data.prefs.LegacyCleanup
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-private const val BANK_CLEANUP_VERSION = 1
+private const val BANK_CLEANUP_VERSION = 2
 
 class TestoGenApp : Application() {
 
