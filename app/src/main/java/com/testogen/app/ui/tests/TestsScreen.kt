@@ -44,7 +44,7 @@ class TestsViewModel(db: AppDatabase) : ViewModel() {
 }
 
 @Composable
-fun TestsScreen(onOpenSettings: () -> Unit, showMessage: (String) -> Unit) {
+fun TestsScreen(onOpenSettings: () -> Unit, onNewTest: () -> Unit, onOpenTest: (Long) -> Unit) {
     val container = LocalAppContainer.current
     val vm: TestsViewModel = viewModel { TestsViewModel(container.database) }
     val tests by vm.tests.collectAsStateWithLifecycle()
@@ -76,7 +76,7 @@ fun TestsScreen(onOpenSettings: () -> Unit, showMessage: (String) -> Unit) {
                 Spacer(Modifier.height(18.dp))
                 PrimaryButton(
                     text = "Собрать тест",
-                    onClick = { showMessage("Сборка теста появится на этапе 4") },
+                    onClick = onNewTest,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -97,7 +97,7 @@ fun TestsScreen(onOpenSettings: () -> Unit, showMessage: (String) -> Unit) {
             items(tests, key = { it.id }, contentType = { "test" }) { test ->
                 SoftCard(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = pad),
-                    onClick = { showMessage("Открытие теста появится на этапе 4") },
+                    onClick = { onOpenTest(test.id) },
                 ) {
                     Text(test.title, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))

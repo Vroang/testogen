@@ -81,6 +81,19 @@ interface QuestionDao {
 
     @Query("SELECT MIN(topic) FROM questions GROUP BY topicKey ORDER BY MAX(updatedAt) DESC LIMIT 30")
     suspend fun recentTopics(): List<String>
+
+    @Query("SELECT id, difficulty, topicKey FROM questions WHERE topicKey IN (:topicKeys) AND difficulty IN (:difficulties)")
+    suspend fun candidates(topicKeys: List<String>, difficulties: List<Int>): List<com.testogen.app.data.Candidate>
+
+    @Query("SELECT * FROM questions WHERE id IN (SELECT questionId FROM test_items WHERE testId = :testId)")
+    fun observeForTest(testId: Long): Flow<List<QuestionEntity>>
+
+    @Query("SELECT * FROM questions WHERE topicKey = :topicKey AND id NOT IN (:exclude) ORDER BY RANDOM()")
+    suspend fun unusedInTopic(topicKey: String, exclude: List<Long>): List<QuestionEntity>
+
+    /** Тема, по которой большинство вопросов создано из параграфа учебника: id этого параграфа. */
+    @Query("SELECT sectionId FROM questions WHERE topicKey = :topicKey AND sectionId IS NOT NULL GROUP BY sectionId ORDER BY COUNT(*) DESC LIMIT 1")
+    suspend fun mainSection(topicKey: String): Long?
 }
 
 data class QuestionText(val text: String, val answer: String)
@@ -156,6 +169,37 @@ interface TestDao {
 
     @Query("SELECT * FROM test_items WHERE testId = :testId ORDER BY variant, position")
     suspend fun items(testId: Long): List<TestItemEntity>
+
+    @Query("SELECT * FROM test_items WHERE testId = :testId ORDER BY variant, position")
+    fun observeItems(testId: Long): Flow<List<TestItemEntity>>
+
+    @Query("SELECT * FROM tests WHERE id = :id")
+    fun observe(id: Long): Flow<TestEntity?>
+
+    @Query("SELECT * FROM tests WHERE id = :id")
+    suspend fun get(id: Long): TestEntity?
+
+    @Query("UPDATE test_items SET questionId = :questionId WHERE testId = :testId AND variant = :variant AND position = :position")
+    suspend fun setQuestion(testId: Long, variant: Int, position: Int, questionId: Long)
+
+    @Query("DELETE FROM test_items WHERE testId = :testId AND variant = :variant AND position = :position")
+    suspend fun deleteItem(testId: Long, variant: Int, position: Int)
+
+    /** Сдвиг номеров в варианте (удаление/возврат вопроса). Через отрицательные числа — чтобы не столкнуться ключами. */
+    @Query("UPDATE test_items SET position = -(position + :delta) WHERE testId = :testId AND variant = :variant AND position >= :from")
+    suspend fun shiftNegative(testId: Long, variant: Int, from: Int, delta: Int)
+
+    @Query("UPDATE test_items SET position = -position WHERE testId = :testId AND variant = :variant AND position < 0")
+    suspend fun flipPositive(testId: Long, variant: Int)
+
+    @Query("UPDATE tests SET title = :title, updatedAt = :now WHERE id = :id")
+    suspend fun rename(id: Long, title: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tests SET updatedAt = :now WHERE id = :id")
+    suspend fun touch(id: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tests SET layoutJson = :json, updatedAt = :now WHERE id = :id")
+    suspend fun setLayout(id: Long, json: String?, now: Long = System.currentTimeMillis())
 }
 
 @Dao
@@ -189,6 +233,9 @@ interface ReplacementReasonDao {
 
     @Query("SELECT COUNT(*) FROM replacement_reasons WHERE processed = 0")
     fun observeUnprocessedCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM replacement_reasons WHERE processed = 0")
+    suspend fun unprocessedCount(): Int
 
     @Query("UPDATE replacement_reasons SET processed = 1 WHERE id IN (:ids)")
     suspend fun markProcessed(ids: List<Long>)

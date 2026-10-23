@@ -4,6 +4,10 @@ import com.testogen.app.data.QuestionDraft
 import com.testogen.app.data.QuestionRepository
 import com.testogen.app.data.db.AppDatabase
 import com.testogen.app.data.db.Difficulty
+import com.testogen.app.data.db.GlossaryEntity
+import com.testogen.app.data.db.QuestionEntity
+import com.testogen.app.data.db.TextbookEntity
+import com.testogen.app.data.db.TextbookSectionEntity
 import com.testogen.app.data.db.QuestionSource
 import com.testogen.app.data.db.QuestionText
 import com.testogen.app.data.topicKey
@@ -118,21 +122,9 @@ class QuestionGenerator(
             val left = quotas[index] - db.questions().countByJobSection(jobId, section.id)
             if (left <= 0 || text.parts.isEmpty()) continue
             val partQuotas = allocate(left, text.parts.map { it.length })
-            val keywords = section.keywords.lines().filter { it.isNotBlank() }
-            val definitions = glossary
-                .filter { g -> keywords.any { k -> g.term.equals(k, ignoreCase = true) || k.contains(g.term, ignoreCase = true) } }
-                .map { "${it.term} — ${it.definition}" }
-            for ((pi, part) in text.parts.withIndex()) {
+            for (pi in text.parts.indices) {
                 if (partQuotas[pi] <= 0) continue
-                val prefix = Prompts.textbookPrefix(
-                    bookTitle = book.title,
-                    grade = book.grade,
-                    sectionTitle = section.fullTitle,
-                    part = if (text.parts.size > 1) "часть ${pi + 1} из ${text.parts.size}" else null,
-                    text = part,
-                    bookQuestions = text.bookQuestions,
-                    definitions = definitions,
-                )
+                val prefix = sectionPrefix(book, section, text, pi, glossary)
                 val unit = Unit(
                     operation = "textbook",
                     topic = section.fullTitle,
@@ -278,6 +270,96 @@ class QuestionGenerator(
             totals.saved += toSave.size
             progress.saved(totals.saved, dropped, cost)
         }
+    }
+
+    /** Итог замены: id нового вопроса в банке и стоимость. */
+    data class Replacement(val questionId: Long, val costUsd: Double)
+
+    /**
+     * Новый вопрос на замену [old] с учётом причины. Для вопроса из учебника — по тексту того же
+     * параграфа (с цитатой); иначе — по теме. Нейросеть предлагает три варианта, берётся первый,
+     * прошедший все проверки. Новый вопрос сохраняется в банк.
+     */
+    suspend fun replaceOne(old: QuestionEntity, reason: String, difficulty: Difficulty, review: Boolean): Replacement {
+        val section = old.sectionId?.let { db.textbooks().section(it) }
+        val book = section?.let { db.textbooks().get(it.textbookId) }
+        val text = section?.let { SectionText.build(db.textbooks().blocks(it.id), includeSide = true) }
+        val existing = db.questions().textsByTopic(old.topicKey)
+        val rules = db.aiRules().active().map { it.text }
+        val oldAnswer = listOf(old.option1, old.option2, old.option3, old.option4)[old.correctIndex]
+        val task = Prompts.replaceTask(
+            old.topic, old.grade, old.text, oldAnswer, reason, difficulty, rules, existingLines(existing), fromTextbook = text != null,
+        )
+        val user = if (section != null && book != null && text != null && text.parts.isNotEmpty()) {
+            // Часть параграфа, где была цитата старого вопроса (или первая); начало запроса — как при генерации (кэш)
+            val partIndex = old.quote?.let { q -> text.parts.indexOfFirst { QuoteMatcher.find(it, q) != null } }?.takeIf { it >= 0 } ?: 0
+            sectionPrefix(book, section, text, partIndex, db.textbooks().glossary(book.id)) + "\n\n" + task
+        } else {
+            task
+        }
+        val result = ai.complete(ChatRequest(operation = "replace", system = Prompts.GENERATE_SYSTEM, user = user, maxTokens = 1800, temperature = 0.8, note = old.topic))
+        var cost = result.costUsd
+        val parsed = QuestionQuality.parse(result.content).accepted.map { it.copy(difficulty = difficulty) }
+        val known = existing.map { QuestionQuality.fingerprint(it.text, it.answer) }
+        val candidates = parsed.mapNotNull { q ->
+            if (known.any { QuestionQuality.isDuplicate(it, QuestionQuality.fingerprint(q.question, q.correct)) }) return@mapNotNull null
+            if (text == null) return@mapNotNull q to null
+            val loc = q.quote.takeIf { it.isNotBlank() }?.let { QuoteMatcher.find(text.full, it) } ?: return@mapNotNull null
+            q to Located(loc.first, loc.last + 1)
+        }
+        if (candidates.isEmpty()) throw AiException("Нейросеть не смогла придумать подходящую замену. Попробуйте ещё раз или возьмите вопрос из банка.", retryable = true)
+        val approved = if (review) {
+            val (ok, reviewCost) = review(candidates.map { it.first })
+            cost += reviewCost
+            candidates.filter { it.first in ok }
+        } else {
+            candidates
+        }
+        val (q, loc) = approved.firstOrNull() ?: candidates.first()
+        val s = QuestionQuality.shuffle(q)
+        val id = questions.insertAll(
+            listOf(
+                QuestionDraft(
+                    text = q.question,
+                    options = s.options,
+                    correctIndex = s.correctIndex,
+                    difficulty = q.difficulty,
+                    topic = old.topic,
+                    grade = old.grade,
+                    source = QuestionSource.of(old.source),
+                    explanation = q.explanation,
+                    textbookId = old.textbookId,
+                    sectionId = old.sectionId,
+                    quote = loc?.let { q.quote },
+                    quoteStart = loc?.start,
+                    quoteEnd = loc?.end,
+                ),
+            ),
+        ).first()
+        return Replacement(id, cost)
+    }
+
+    /** Начало сообщения по параграфу — одинаковое для генерации и замены, поэтому берётся из кэша DeepSeek. */
+    private fun sectionPrefix(
+        book: TextbookEntity,
+        section: TextbookSectionEntity,
+        text: SectionText,
+        partIndex: Int,
+        glossary: List<GlossaryEntity>,
+    ): String {
+        val keywords = section.keywords.lines().filter { it.isNotBlank() }
+        val definitions = glossary
+            .filter { g -> keywords.any { k -> g.term.equals(k, ignoreCase = true) || k.contains(g.term, ignoreCase = true) } }
+            .map { "${it.term} — ${it.definition}" }
+        return Prompts.textbookPrefix(
+            bookTitle = book.title,
+            grade = book.grade,
+            sectionTitle = section.fullTitle,
+            part = if (text.parts.size > 1) "часть ${partIndex + 1} из ${text.parts.size}" else null,
+            text = text.parts[partIndex],
+            bookQuestions = text.bookQuestions,
+            definitions = definitions,
+        )
     }
 
     private fun existingLines(existing: List<QuestionText>) =

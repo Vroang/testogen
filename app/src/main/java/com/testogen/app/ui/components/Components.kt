@@ -305,6 +305,8 @@ fun ChoicePill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 12.dp,
+    /** false — длинная подпись переносится на следующие строки (например, название темы). */
+    singleLine: Boolean = true,
 ) {
     val container by androidx.compose.animation.animateColorAsState(
         if (selected) Palette.Primary else Palette.Surface,
@@ -325,7 +327,7 @@ fun ChoicePill(
         modifier = modifier.heightIn(min = 52.dp),
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 12.dp)) {
-            Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
+            Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = if (singleLine) 1 else 3, softWrap = !singleLine)
         }
     }
 }

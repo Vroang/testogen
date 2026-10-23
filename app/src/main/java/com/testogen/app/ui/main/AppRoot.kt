@@ -25,7 +25,10 @@ import com.testogen.app.ui.generate.JobScreen
 import com.testogen.app.ui.rules.RulesScreen
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.ailog.AiLogScreen
+import com.testogen.app.ui.export.ExportScreen
 import com.testogen.app.ui.settings.SettingsScreen
+import com.testogen.app.ui.tests.TestBuilderScreen
+import com.testogen.app.ui.tests.TestEditorScreen
 import com.testogen.app.ui.textbooks.GenerateTextbookScreen
 import com.testogen.app.ui.textbooks.PdfPageScreen
 import com.testogen.app.ui.textbooks.SectionReaderScreen
@@ -69,6 +72,15 @@ data class PdfPageRoute(val textbookId: Long, val page: Int)
 
 @Serializable
 data class GenerateTextbookRoute(val textbookId: Long, val preselect: Long = 0)
+
+@Serializable
+data object TestBuilderRoute
+
+@Serializable
+data class TestEditorRoute(val id: Long)
+
+@Serializable
+data class ExportRoute(val testId: Long)
 
 /** Плавное «выразительное» замедление, как в Material 3. */
 private val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -117,7 +129,28 @@ fun AppRoot(debugTopic: String? = null) {
                 onOpenTopic = { key, title -> nav.navigate(TopicRoute(key, title)) },
                 onOpenJob = { nav.navigate(JobRoute(it)) },
                 onOpenTextbook = { nav.navigate(TextbookRoute(it)) },
+                onNewTest = { nav.navigate(TestBuilderRoute) },
+                onOpenTest = { nav.navigate(TestEditorRoute(it)) },
             )
+        }
+        composable<TestBuilderRoute> {
+            TestBuilderScreen(
+                onBack = { nav.popBackStack() },
+                onBuilt = { id -> nav.navigate(TestEditorRoute(id)) { popUpTo<TestBuilderRoute> { inclusive = true } } },
+            )
+        }
+        composable<TestEditorRoute> { entry ->
+            val route = entry.toRoute<TestEditorRoute>()
+            TestEditorScreen(
+                testId = route.id,
+                onBack = { nav.popBackStack() },
+                onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
+                onSource = { q -> openSource(nav, q) },
+                onExport = { nav.navigate(ExportRoute(it)) },
+            )
+        }
+        composable<ExportRoute> { entry ->
+            ExportScreen(testId = entry.toRoute<ExportRoute>().testId, onBack = { nav.popBackStack() })
         }
         composable<TextbookRoute> { entry ->
             val route = entry.toRoute<TextbookRoute>()

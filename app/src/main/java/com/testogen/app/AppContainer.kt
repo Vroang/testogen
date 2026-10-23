@@ -5,6 +5,7 @@ import com.testogen.app.ai.AiClient
 import com.testogen.app.ai.QuestionGenerator
 import com.testogen.app.ai.RulesUpdater
 import com.testogen.app.data.QuestionRepository
+import com.testogen.app.data.TestRepository
 import com.testogen.app.data.db.AppDatabase
 import com.testogen.app.data.prefs.AppPrefs
 import com.testogen.app.data.prefs.KeysRepository
@@ -40,6 +41,8 @@ class AppContainer(context: Context) {
     val ai: AiClient by lazy { AiClient(http, keys, database.aiRequests()) }
 
     val questions: QuestionRepository by lazy { QuestionRepository(database) }
+
+    val tests: TestRepository by lazy { TestRepository(database) }
 
     val generator: QuestionGenerator by lazy { QuestionGenerator(database, ai, questions) }
 

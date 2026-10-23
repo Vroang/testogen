@@ -157,6 +157,38 @@ n — номер вопроса; problem — коротко, что не так 
         }
     }.trimEnd()
 
+    /** Задание на замену вопроса: после текста учебника (если есть) или вместо задания по теме. */
+    fun replaceTask(
+        topic: String,
+        grade: Int?,
+        oldQuestion: String,
+        oldAnswer: String,
+        reason: String,
+        difficulty: Difficulty,
+        rules: List<String>,
+        existing: List<String>,
+        fromTextbook: Boolean,
+    ): String = buildString {
+        if (rules.isNotEmpty()) {
+            appendLine("ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА УЧИТЕЛЯ (обязательно соблюдай):")
+            rules.forEach { appendLine("- $it") }
+            appendLine()
+        }
+        appendLine("ЗАМЕНА ВОПРОСА")
+        if (!fromTextbook) appendLine("Тема: «$topic»")
+        appendLine(gradeLine(grade))
+        appendLine("Учитель убирает из теста вопрос: «$oldQuestion» (верный ответ: $oldAnswer).")
+        appendLine("Причина: $reason")
+        append("Составь 3 разных новых вопроса на замену по той же теме, учитывая причину. Сложность всех трёх: ${difficultyCode(difficulty)}.")
+        if (fromTextbook) append(" Строго по тексту учебника выше; у каждого — дословная цитата-источник в поле quote.")
+        appendLine()
+        if (existing.isNotEmpty()) {
+            appendLine()
+            appendLine("УЖЕ ЕСТЬ В БАНКЕ (вопрос → верный ответ) — не повторяй эти факты и ответы:")
+            existing.forEachIndexed { i, q -> appendLine("${i + 1}. $q") }
+        }
+    }.trimEnd()
+
     /** Переменная часть сообщения для генерации по учебнику — идёт после текста. */
     fun textbookTask(counts: Map<Difficulty, Int>, rules: List<String>, existing: List<String>): String = buildString {
         if (rules.isNotEmpty()) {

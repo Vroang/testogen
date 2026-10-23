@@ -49,6 +49,10 @@ fun QuestionCard(
     onDelete: (() -> Unit)? = null,
     /** «Откуда вопрос»: открыть учебник на цитате-источнике. */
     onSource: (() -> Unit)? = null,
+    /** «Заменить» — в редакторе теста. */
+    onReplace: (() -> Unit)? = null,
+    /** Подпись над карточкой, например «Вопрос удалён из банка». */
+    note: String? = null,
 ) {
     var expanded by rememberSaveable(question.id) { mutableStateOf(false) }
     SoftCard(
@@ -70,6 +74,7 @@ fun QuestionCard(
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            note?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = Palette.Error) }
             DifficultyTag(Difficulty.of(question.difficulty))
             question.grade?.let {
                 Text("$it класс", style = MaterialTheme.typography.labelMedium, color = Palette.TextSecondary)
@@ -111,8 +116,15 @@ fun QuestionCard(
                     Spacer(Modifier.height(8.dp))
                     Text("«$quote»", style = MaterialTheme.typography.bodyMedium, color = Palette.OnAccentSoft)
                 }
-                if (onEdit != null || onDelete != null || (onSource != null && question.sectionId != null)) {
+                if (onEdit != null || onDelete != null || onReplace != null || (onSource != null && question.sectionId != null)) {
                     androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (onReplace != null) {
+                            TextButton(onClick = onReplace) {
+                                Icon(com.testogen.app.ui.theme.AppIcons.Sparkle, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Заменить")
+                            }
+                        }
                         if (onSource != null && question.sectionId != null) {
                             TextButton(onClick = onSource) {
                                 Icon(com.testogen.app.ui.theme.AppIcons.Book, contentDescription = null, modifier = Modifier.size(20.dp))
