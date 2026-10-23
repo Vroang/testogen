@@ -56,11 +56,16 @@ data class ChatResult(
     val costUsd: Double,
 )
 
-/** Ошибка с понятным маме текстом. [retryable] — есть смысл попробовать позже. */
-class AiException(message: String, val retryable: Boolean = false) : Exception(message)
+/**
+ * Ошибка с понятным маме текстом. [retryable] — есть смысл попробовать позже.
+ * [unavailable] — провайдер недоступен (сеть, сбой сервера, таймаут) или на счёте нет денег:
+ * только в этих случаях переключаемся на запасной OpenRouter. Ошибки самого запроса
+ * (неверный ключ, отказ в теме, кривые параметры) показываются как есть.
+ */
+class AiException(message: String, val retryable: Boolean = false, val unavailable: Boolean = false) : Exception(message)
 
-/** Баланс на счёте провайдера (для проверки ключа в настройках). */
-data class Balance(val provider: Provider, val text: String)
+/** Баланс на счёте провайдера (для проверки ключа в настройках). [usd] — null, если провайдер не сообщил сумму. */
+data class Balance(val provider: Provider, val usd: Double?)
 
 /**
  * Обращения к нейросети: сначала DeepSeek напрямую, при его недоступности — OpenRouter.
@@ -92,6 +97,7 @@ class AiClient(
             try {
                 return call(Provider.DEEPSEEK, deepSeek, request)
             } catch (e: AiException) {
+                if (!e.unavailable || openRouter.isBlank()) throw e
                 firstError = e
             }
         }
@@ -210,7 +216,10 @@ class AiClient(
                     message = problem ?: if (finish == "length") "ответ оборван по лимиту" else request.note,
                 ),
             )
-            if (problem != null) throw AiException(problem, retryable = finish == "insufficient_system_resource")
+            if (problem != null) {
+                val overloaded = finish == "insufficient_system_resource"
+                throw AiException(problem, retryable = overloaded, unavailable = overloaded)
+            }
             ChatResult(content, provider, truncated = finish == "length", costUsd = cost)
         }
 
@@ -229,27 +238,26 @@ class AiClient(
         if (provider == Provider.OPENROUTER && code in 401..403) {
             // Не у всех ключей OpenRouter есть доступ к балансу — тогда просто проверяем сам ключ
             val (keyCode, keyText) = get("https://openrouter.ai/api/v1/key", key)
-            if (keyCode in 200..299) return@withContext Balance(provider, "ключ работает")
+            if (keyCode in 200..299) return@withContext Balance(provider, null)
             code = keyCode
             text = keyText
         }
         if (code !in 200..299) throw httpError(provider, code, text)
         val root = json.parseToJsonElement(text).jsonObject
-        val value = when (provider) {
+        val usd = when (provider) {
             Provider.DEEPSEEK -> {
-                val info = root["balance_infos"]?.jsonArray?.firstOrNull()?.jsonObject
-                val amount = info?.get("total_balance")?.jsonPrimitive?.contentOrNull
-                val currency = info?.get("currency")?.jsonPrimitive?.contentOrNull.orEmpty()
-                if (amount == null) "ключ работает" else "на счёте $amount ${if (currency == "USD") "$" else currency}"
+                val infos = root["balance_infos"]?.jsonArray?.map { it.jsonObject }.orEmpty()
+                val info = infos.firstOrNull { it["currency"]?.jsonPrimitive?.contentOrNull == "USD" }
+                info?.get("total_balance")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
             }
             Provider.OPENROUTER -> {
                 val data = root["data"]?.jsonObject
                 val total = data?.get("total_credits")?.jsonPrimitive?.double ?: 0.0
                 val used = data?.get("total_usage")?.jsonPrimitive?.double ?: 0.0
-                "на счёте ${"%.2f".format(total - used)} $"
+                total - used
             }
         }
-        Balance(provider, value)
+        Balance(provider, usd)
     }
 
     private fun get(url: String, key: String): Pair<Int, String> {
@@ -262,10 +270,10 @@ class AiClient(
     }
 
     private fun networkError(e: IOException): AiException = when (e) {
-        is UnknownHostException -> AiException("Нет подключения к интернету", retryable = true)
-        is InterruptedIOException -> AiException("Нейросеть слишком долго не отвечает", retryable = true)
-        is SSLException -> AiException("Не удалось установить защищённое соединение", retryable = true)
-        else -> AiException("Связь с нейросетью прервалась", retryable = true)
+        is UnknownHostException -> AiException("Нет подключения к интернету", retryable = true, unavailable = true)
+        is InterruptedIOException -> AiException("Нейросеть слишком долго не отвечает", retryable = true, unavailable = true)
+        is SSLException -> AiException("Не удалось установить защищённое соединение", retryable = true, unavailable = true)
+        else -> AiException("Связь с нейросетью прервалась", retryable = true, unavailable = true)
     }
 
     private fun httpError(provider: Provider, code: Int, body: String): AiException {
@@ -275,11 +283,11 @@ class AiClient(
         }.getOrNull()?.take(160)
         return when (code) {
             401, 403 -> AiException("Ключ $name не подходит — проверьте его в настройках")
-            402 -> AiException("На счёте $name закончились деньги — пополните баланс")
+            402 -> AiException("На счёте $name закончились деньги — пополните баланс", unavailable = true)
             429 -> AiException("$name просит подождать: слишком много запросов. Попробуйте через минуту", retryable = true)
             400, 422 -> AiException("$name не принял запрос" + (detail?.let { ": $it" } ?: ""))
-            500, 502, 503, 504 -> AiException("Сервер $name перегружен или сломался, попробуйте позже", retryable = true)
-            else -> AiException("$name ответил ошибкой $code" + (detail?.let { ": $it" } ?: ""), retryable = code >= 500)
+            in 500..599 -> AiException("Сервер $name перегружен или сломался, попробуйте позже", retryable = true, unavailable = true)
+            else -> AiException("$name ответил ошибкой $code" + (detail?.let { ": $it" } ?: ""))
         }
     }
 

@@ -66,6 +66,7 @@ fun TopicQuestionsScreen(
     onGenerateMore: (String) -> Unit,
     onAddManual: (String) -> Unit,
     onEdit: (Long) -> Unit,
+    onSource: (QuestionEntity) -> Unit,
 ) {
     val container = LocalAppContainer.current
     val vm: TopicQuestionsViewModel = viewModel(key = "topic-$topicKey") { TopicQuestionsViewModel(container, topicKey) }
@@ -101,6 +102,7 @@ fun TopicQuestionsScreen(
                     q,
                     number = i + 1,
                     onEdit = { onEdit(q.id) },
+                    onSource = { onSource(q) },
                     onDelete = {
                         vm.delete(q)
                         scope.launch {

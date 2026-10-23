@@ -57,7 +57,7 @@ import com.testogen.app.ui.components.SoftCard
 import com.testogen.app.ui.theme.AppIcons
 import com.testogen.app.ui.theme.LocalDimens
 import com.testogen.app.ui.theme.Palette
-import com.testogen.app.util.formatUsd
+import com.testogen.app.ui.money
 import com.testogen.app.util.plural
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -81,6 +81,7 @@ fun JobScreen(
     onBack: () -> Unit,
     onOpenTopic: (key: String, title: String) -> Unit,
     onEditQuestion: (Long) -> Unit,
+    onSource: (QuestionEntity) -> Unit,
 ) {
     val container = LocalAppContainer.current
     val vm: JobViewModel = viewModel(key = "job-$jobId") { JobViewModel(container, jobId) }
@@ -95,7 +96,9 @@ fun JobScreen(
     ) {
         item(key = "header") { BackHeader("Создание вопросов", onBack) }
         item(key = "status") {
-            job?.let { StatusCard(it, vm::cancel, vm::retry, onBack, onOpenTopic, Modifier.padding(horizontal = pad)) }
+            // Темы созданных вопросов: у генерации по нескольким параграфам их несколько
+            val topics = questions.map { it.topicKey to it.topic }.distinct().ifEmpty { job?.let { listOf(topicKey(it.title) to it.title) }.orEmpty() }
+            job?.let { StatusCard(it, topics, vm::cancel, vm::retry, onBack, onOpenTopic, Modifier.padding(horizontal = pad)) }
         }
         if (questions.isNotEmpty()) {
             item(key = "label") {
@@ -107,6 +110,7 @@ fun JobScreen(
                 q,
                 number = i + 1,
                 onEdit = { onEditQuestion(q.id) },
+                onSource = { onSource(q) },
                 modifier = Modifier
                     .padding(horizontal = pad)
                     .animateItem(fadeInSpec = tween(400), placementSpec = tween(300)),
@@ -125,6 +129,7 @@ fun JobScreen(
 @Composable
 private fun StatusCard(
     job: GenerationJobEntity,
+    topics: List<Pair<String, String>>,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
     onDone: () -> Unit,
@@ -176,7 +181,7 @@ private fun StatusCard(
         Text(
             "Готово ${job.saved} из ${job.total}" +
                 (if (job.dropped > 0) " · отсеяно ${job.dropped}" else "") +
-                (if (job.costUsd > 0) " · ${formatUsd(job.costUsd)}" else ""),
+                (if (job.costUsd > 0) " · ${money(job.costUsd)}" else ""),
             style = MaterialTheme.typography.bodyMedium,
             color = Palette.TextSecondary,
         )
@@ -197,11 +202,14 @@ private fun StatusCard(
                 SecondaryButton("Остановить", onCancel, Modifier.fillMaxWidth())
             }
             job.status == "done" -> {
-                PrimaryButton(
-                    "Открыть тему",
-                    { onOpenTopic(topicKey(job.title), job.title) },
-                    Modifier.fillMaxWidth(),
-                )
+                if (topics.size == 1) {
+                    PrimaryButton("Открыть тему", { onOpenTopic(topics[0].first, topics[0].second) }, Modifier.fillMaxWidth())
+                } else {
+                    topics.forEach { (key, title) ->
+                        PrimaryButton(title, { onOpenTopic(key, title) }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 SecondaryButton("Готово", onDone, Modifier.fillMaxWidth())
             }

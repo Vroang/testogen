@@ -39,6 +39,7 @@ import com.testogen.app.data.db.QuestionEntity
 import com.testogen.app.ui.theme.Palette
 
 /** Вопрос банка: тап раскрывает варианты (верный отмечен) и пояснение. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun QuestionCard(
     question: QuestionEntity,
@@ -46,6 +47,8 @@ fun QuestionCard(
     number: Int? = null,
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    /** «Откуда вопрос»: открыть учебник на цитате-источнике. */
+    onSource: (() -> Unit)? = null,
 ) {
     var expanded by rememberSaveable(question.id) { mutableStateOf(false) }
     SoftCard(
@@ -104,8 +107,19 @@ fun QuestionCard(
                     Spacer(Modifier.height(8.dp))
                     Text(it, style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = Palette.TextSecondary)
                 }
-                if (onEdit != null || onDelete != null) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                question.quote?.takeIf { question.sectionId != null }?.let { quote ->
+                    Spacer(Modifier.height(8.dp))
+                    Text("«$quote»", style = MaterialTheme.typography.bodyMedium, color = Palette.OnAccentSoft)
+                }
+                if (onEdit != null || onDelete != null || (onSource != null && question.sectionId != null)) {
+                    androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (onSource != null && question.sectionId != null) {
+                            TextButton(onClick = onSource) {
+                                Icon(com.testogen.app.ui.theme.AppIcons.Book, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Откуда вопрос")
+                            }
+                        }
                         if (onEdit != null) {
                             TextButton(onClick = onEdit) {
                                 Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(20.dp))

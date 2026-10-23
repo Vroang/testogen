@@ -67,6 +67,15 @@ interface QuestionDao {
     @Query("SELECT COUNT(*) FROM questions WHERE jobId = :jobId")
     suspend fun countByJob(jobId: Long): Int
 
+    @Query("SELECT COUNT(*) FROM questions WHERE jobId = :jobId AND sectionId = :sectionId")
+    suspend fun countByJobSection(jobId: Long, sectionId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM questions WHERE sectionId = :sectionId")
+    fun observeCountBySection(sectionId: Long): Flow<Int>
+
+    @Query("SELECT sectionId AS code, COUNT(*) AS count FROM questions WHERE textbookId = :textbookId GROUP BY sectionId")
+    fun observeCountsBySection(textbookId: Long): Flow<List<LongCount>>
+
     @Query("SELECT difficulty AS code, COUNT(*) AS count FROM questions WHERE jobId = :jobId GROUP BY difficulty")
     suspend fun difficultyCountsByJob(jobId: Long): List<CodeCount>
 
@@ -77,6 +86,8 @@ interface QuestionDao {
 data class QuestionText(val text: String, val answer: String)
 
 data class CodeCount(val code: Int, val count: Int)
+
+data class LongCount(val code: Long, val count: Int)
 
 @Dao
 interface GenerationJobDao {
@@ -106,6 +117,15 @@ interface GenerationJobDao {
             "updatedAt = :now WHERE id = :id",
     )
     suspend fun addProgress(id: Long, saved: Int, dropped: Int, cost: Double, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE generation_jobs SET total = :total WHERE id = :id")
+    suspend fun setTotal(id: Long, total: Int)
+
+    @Query("UPDATE generation_jobs SET saved = :done, updatedAt = :now WHERE id = :id")
+    suspend fun setDone(id: Long, done: Int, now: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM generation_jobs WHERE kind = 'import' AND status IN ('queued', 'running')")
+    fun observeImports(): Flow<List<GenerationJobEntity>>
 
     @Query("UPDATE generation_jobs SET costUsd = costUsd + :cost WHERE id = :id")
     suspend fun addCost(id: Long, cost: Double)
@@ -198,8 +218,13 @@ interface AiRequestDao {
         ReplacementReasonEntity::class,
         AiRequestEntity::class,
         GenerationJobEntity::class,
+        TextbookEntity::class,
+        TextbookChapterEntity::class,
+        TextbookSectionEntity::class,
+        SectionBlockEntity::class,
+        GlossaryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -209,6 +234,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun replacementReasons(): ReplacementReasonDao
     abstract fun aiRequests(): AiRequestDao
     abstract fun jobs(): GenerationJobDao
+    abstract fun textbooks(): TextbookDao
 
     companion object {
         /** Новое имя: старая база `testogen.db` не переносится, а удаляется (см. LegacyCleanup). */

@@ -35,7 +35,7 @@ import com.testogen.app.ui.theme.AppIcons
 import com.testogen.app.ui.theme.LocalDimens
 import com.testogen.app.ui.theme.Palette
 import com.testogen.app.util.formatDate
-import com.testogen.app.util.formatUsd
+import com.testogen.app.ui.money
 import com.testogen.app.util.plural
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -78,7 +78,7 @@ fun AiLogScreen(onBack: () -> Unit) {
             SoftCard(Modifier.fillMaxWidth().padding(horizontal = pad), color = Palette.PrimarySoft) {
                 Text("За 30 дней", style = MaterialTheme.typography.titleSmall, color = Palette.OnPrimarySoft)
                 Spacer(Modifier.height(4.dp))
-                Text(formatUsd(month.costUsd), style = MaterialTheme.typography.headlineMedium, color = Palette.OnPrimarySoft)
+                Text(money(month.costUsd), style = MaterialTheme.typography.headlineMedium, color = Palette.OnPrimarySoft)
                 Text(
                     "${month.requests} ${plural(month.requests, "запрос", "запроса", "запросов")}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -109,7 +109,7 @@ private fun LogRow(entry: AiRequestEntity, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(operationTitle(entry.operation), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Text(
-                if (entry.status == "ok") formatUsd(entry.costUsd) else "ошибка",
+                if (entry.status == "ok") money(entry.costUsd) else "ошибка",
                 style = MaterialTheme.typography.titleSmall,
                 color = if (entry.status == "ok") Palette.Primary else Palette.Error,
             )

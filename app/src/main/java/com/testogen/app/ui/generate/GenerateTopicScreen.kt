@@ -56,7 +56,7 @@ import com.testogen.app.ui.components.SoftCard
 import com.testogen.app.ui.theme.AppIcons
 import com.testogen.app.ui.theme.LocalDimens
 import com.testogen.app.ui.theme.Palette
-import com.testogen.app.util.formatUsd
+import com.testogen.app.ui.money
 import com.testogen.app.util.plural
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -261,7 +261,7 @@ fun GenerateTopicScreen(
         item(key = "start") {
             androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = pad)) {
                 Text(
-                    "Примерная стоимость: ${formatUsd(vm.estimate)}",
+                    "Примерная стоимость: ${money(vm.estimate)}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Palette.TextSecondary,
                     modifier = Modifier.padding(bottom = 10.dp),

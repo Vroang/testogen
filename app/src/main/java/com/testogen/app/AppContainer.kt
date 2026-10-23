@@ -8,6 +8,7 @@ import com.testogen.app.data.QuestionRepository
 import com.testogen.app.data.db.AppDatabase
 import com.testogen.app.data.prefs.AppPrefs
 import com.testogen.app.data.prefs.KeysRepository
+import com.testogen.app.textbook.TextbookImporter
 import com.testogen.app.update.Updater
 import com.testogen.app.work.GenerationJobs
 import kotlinx.coroutines.CoroutineScope
@@ -45,4 +46,6 @@ class AppContainer(context: Context) {
     val rules: RulesUpdater by lazy { RulesUpdater(database, ai) }
 
     val jobs: GenerationJobs by lazy { GenerationJobs(context, database) }
+
+    val importer: TextbookImporter by lazy { TextbookImporter(context, database) }
 }

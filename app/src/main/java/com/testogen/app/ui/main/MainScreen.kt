@@ -50,6 +50,7 @@ fun MainScreen(
     onAddManual: (String) -> Unit,
     onOpenTopic: (key: String, title: String) -> Unit,
     onOpenJob: (Long) -> Unit,
+    onOpenTextbook: (Long) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.TESTS) }
     val stateHolder = rememberSaveableStateHolder()
@@ -99,7 +100,7 @@ fun MainScreen(
                 when (current) {
                     Tab.TESTS -> TestsScreen(onOpenSettings = onOpenSettings, showMessage = showMessage)
                     Tab.BANK -> BankScreen(onOpenSettings, onGenerate, onAddManual, onOpenTopic, onOpenJob)
-                    Tab.TEXTBOOKS -> TextbooksScreen(onOpenSettings = onOpenSettings, showMessage = showMessage)
+                    Tab.TEXTBOOKS -> TextbooksScreen(onOpenSettings = onOpenSettings, onOpenTextbook = onOpenTextbook)
                 }
             }
         }

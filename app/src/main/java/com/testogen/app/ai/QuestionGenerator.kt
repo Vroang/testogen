@@ -5,7 +5,10 @@ import com.testogen.app.data.QuestionRepository
 import com.testogen.app.data.db.AppDatabase
 import com.testogen.app.data.db.Difficulty
 import com.testogen.app.data.db.QuestionSource
+import com.testogen.app.data.db.QuestionText
 import com.testogen.app.data.topicKey
+import com.testogen.app.textbook.QuoteMatcher
+import com.testogen.app.textbook.SectionText
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -30,6 +33,18 @@ data class TopicJobParams(
     val review: Boolean,
 )
 
+/** Параметры задания «вопросы по учебнику». */
+@Serializable
+data class TextbookJobParams(
+    val textbookId: Long,
+    val sectionIds: List<Long>,
+    val total: Int,
+    val difficulties: List<Int>,
+    val review: Boolean,
+    /** Брать ли врезки (биографии, документы) как материал для вопросов. */
+    val includeSide: Boolean = true,
+)
+
 /** Как продвигается генерация — для экрана и уведомления. */
 interface GenerationProgress {
     suspend fun stage(text: String)
@@ -37,8 +52,8 @@ interface GenerationProgress {
 }
 
 /**
- * Генерация вопросов по теме порциями по ~10: промпт → разбор и проверки →
- * отсев похожих на уже имеющиеся → (по желанию) проверка рецензентом → перемешивание
+ * Генерация вопросов порциями по ~10: промпт → разбор и проверки → (для учебника) поиск цитаты
+ * в тексте → отсев похожих на уже имеющиеся → (по желанию) проверка рецензентом → перемешивание
  * вариантов → сохранение. Повторный запуск продолжает с того места, где остановились.
  */
 class QuestionGenerator(
@@ -48,39 +63,139 @@ class QuestionGenerator(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /** Где в тексте параграфа ответ на вопрос. */
+    private class Located(val start: Int, val end: Int)
+
+    /** Одна «единица» генерации: тема или кусок параграфа. */
+    private class Unit(
+        val operation: String,
+        val topic: String,
+        val grade: Int?,
+        val need: Int,
+        /** Сообщение пользователю по нужным количествам, уже имеющимся вопросам и правилам. */
+        val prompt: (counts: Map<Difficulty, Int>, existing: List<QuestionText>, rules: List<String>) -> String,
+        val stage: String,
+        val source: QuestionSource,
+        /** Для учебника: найти цитату в тексте; null — вопрос отбраковывается. */
+        val locate: ((ParsedQuestion) -> Located?)? = null,
+        val textbookId: Long? = null,
+        val sectionId: Long? = null,
+    )
+
+    private class Totals(var saved: Int, val total: Int)
+
     suspend fun runTopic(jobId: Long, params: TopicJobParams, progress: GenerationProgress) {
-        val key = topicKey(params.topic)
         val difficulties = params.difficulties.map { Difficulty.of(it) }.ifEmpty { listOf(Difficulty.MEDIUM) }
-        var saved = db.questions().countByJob(jobId)
+        val totals = Totals(db.questions().countByJob(jobId), params.total)
+        val unit = Unit(
+            operation = "topic",
+            topic = params.topic,
+            grade = params.grade,
+            need = params.total - totals.saved,
+            prompt = { counts, existing, rules -> Prompts.topicUser(params.topic, params.grade, counts, rules, existingLines(existing)) },
+            stage = "Придумываю вопросы…",
+            source = QuestionSource.TOPIC,
+        )
+        runUnit(jobId, unit, difficulties, params.review, totals, progress)
+        if (totals.saved == 0) {
+            throw AiException("Нейросеть не смогла составить подходящие вопросы. Попробуйте уточнить тему.")
+        }
+    }
+
+    suspend fun runTextbook(jobId: Long, params: TextbookJobParams, progress: GenerationProgress) {
+        val difficulties = params.difficulties.map { Difficulty.of(it) }.ifEmpty { listOf(Difficulty.MEDIUM) }
+        val book = db.textbooks().get(params.textbookId) ?: throw AiException("Учебник удалён")
+        val sections = db.textbooks().sectionsByIds(params.sectionIds)
+        if (sections.isEmpty()) throw AiException("Не выбраны параграфы")
+        val glossary = db.textbooks().glossary(book.id)
+        progress.stage("Читаю параграфы…")
+        val texts = sections.associate { it.id to SectionText.build(db.textbooks().blocks(it.id), params.includeSide) }
+        val quotas = allocate(params.total, sections.map { texts.getValue(it.id).sourceChars })
+        val totals = Totals(db.questions().countByJob(jobId), params.total)
+
+        for ((index, section) in sections.withIndex()) {
+            val text = texts.getValue(section.id)
+            val left = quotas[index] - db.questions().countByJobSection(jobId, section.id)
+            if (left <= 0 || text.parts.isEmpty()) continue
+            val partQuotas = allocate(left, text.parts.map { it.length })
+            val keywords = section.keywords.lines().filter { it.isNotBlank() }
+            val definitions = glossary
+                .filter { g -> keywords.any { k -> g.term.equals(k, ignoreCase = true) || k.contains(g.term, ignoreCase = true) } }
+                .map { "${it.term} — ${it.definition}" }
+            for ((pi, part) in text.parts.withIndex()) {
+                if (partQuotas[pi] <= 0) continue
+                val prefix = Prompts.textbookPrefix(
+                    bookTitle = book.title,
+                    grade = book.grade,
+                    sectionTitle = section.fullTitle,
+                    part = if (text.parts.size > 1) "часть ${pi + 1} из ${text.parts.size}" else null,
+                    text = part,
+                    bookQuestions = text.bookQuestions,
+                    definitions = definitions,
+                )
+                val unit = Unit(
+                    operation = "textbook",
+                    topic = section.fullTitle,
+                    grade = book.grade,
+                    need = partQuotas[pi],
+                    prompt = { counts, existing, rules -> prefix + "\n\n" + Prompts.textbookTask(counts, rules, existingLines(existing)) },
+                    stage = "Придумываю вопросы по ${section.label.ifEmpty { section.title }}…",
+                    source = QuestionSource.TEXTBOOK,
+                    locate = { q ->
+                        q.quote.takeIf { it.isNotBlank() }?.let { QuoteMatcher.find(text.full, it) }?.let { Located(it.first, it.last + 1) }
+                    },
+                    textbookId = book.id,
+                    sectionId = section.id,
+                )
+                runUnit(jobId, unit, difficulties, params.review, totals, progress)
+            }
+        }
+        if (totals.saved == 0) {
+            throw AiException("Нейросеть не смогла составить вопросы с опорой на текст. Попробуйте другие параграфы.")
+        }
+    }
+
+    /** Порции по ~10 вопросов, пока не наберётся [Unit.need] или не кончатся попытки. */
+    private suspend fun runUnit(
+        jobId: Long,
+        unit: Unit,
+        difficulties: List<Difficulty>,
+        review: Boolean,
+        totals: Totals,
+        progress: GenerationProgress,
+    ) {
+        val key = topicKey(unit.topic)
+        var savedHere = 0
         var batchLimit = BATCH
         var attempts = 0
-        val maxAttempts = ceil(params.total / BATCH.toDouble()).toInt() * 3 + 2
+        val maxAttempts = ceil(unit.need / BATCH.toDouble()).toInt() * 3 + 2
         var retries = 0
 
-        while (saved < params.total && attempts < maxAttempts) {
+        while (savedHere < unit.need && attempts < maxAttempts) {
             attempts++
-            val need = params.total - saved
+            val need = unit.need - savedHere
             val batch = min(batchLimit, need)
             // Просим чуть больше: часть вопросов может отсеяться
             val ask = batch + if (batch >= 5) 3 else 1
             // Сколько каждой сложности ещё не хватает: модель сама ставит сложность и может перекосить
             val have = db.questions().difficultyCountsByJob(jobId).associate { Difficulty.of(it.code) to it.count }
-            val target = split(params.total, difficulties)
+            val target = split(totals.total, difficulties)
             val counts = askCounts(ask, difficulties.associateWith { ((target[it] ?: 0) - (have[it] ?: 0)).coerceAtLeast(0) })
 
-            progress.stage("Придумываю вопросы…")
+            progress.stage(unit.stage)
             val existing = db.questions().textsByTopic(key)
             val rules = db.aiRules().active().map { it.text }
-            val request = ChatRequest(
-                operation = "topic",
-                system = Prompts.GENERATE_SYSTEM,
-                user = Prompts.topicUser(params.topic, params.grade, counts, rules, existing.take(EXISTING_IN_PROMPT).map { "${it.text.take(150)} → ${it.answer.take(60)}" }),
-                maxTokens = min(8000, 300 + 450 * ask),
-                temperature = 0.8,
-                note = params.topic,
-            )
             val result = try {
-                ai.complete(request)
+                ai.complete(
+                    ChatRequest(
+                        operation = unit.operation,
+                        system = Prompts.GENERATE_SYSTEM,
+                        user = unit.prompt(counts, existing, rules),
+                        maxTokens = min(8000, 300 + 480 * ask),
+                        temperature = 0.8,
+                        note = unit.topic,
+                    ),
+                )
             } catch (e: AiException) {
                 if (e.retryable && retries < 2) {
                     retries++
@@ -96,10 +211,23 @@ class QuestionGenerator(
             if (result.truncated && parsed.accepted.size < batch) batchLimit = max(3, batchLimit / 2)
             var dropped = parsed.rejected.size
 
+            // Для учебника: ответ должен опираться на цитату, которая действительно есть в тексте
+            val located = HashMap<ParsedQuestion, Located>()
+            val locate = unit.locate
+            val withSource = if (locate == null) {
+                parsed.accepted
+            } else {
+                parsed.accepted.filter { q ->
+                    val loc = locate(q)
+                    if (loc != null) located[q] = loc else dropped++
+                    loc != null
+                }
+            }
+
             // Отсев похожих: на банк темы и друг на друга
             val known = existing.mapTo(mutableListOf()) { QuestionQuality.fingerprint(it.text, it.answer) }
             val fresh = mutableListOf<ParsedQuestion>()
-            for (q in parsed.accepted) {
+            for (q in withSource) {
                 val fp = QuestionQuality.fingerprint(q.question, q.correct)
                 if (known.any { QuestionQuality.isDuplicate(it, fp) }) {
                     dropped++
@@ -110,7 +238,7 @@ class QuestionGenerator(
             }
 
             var cost = result.costUsd
-            val approved = if (params.review && fresh.isNotEmpty()) {
+            val approved = if (review && fresh.isNotEmpty()) {
                 progress.stage("Проверяю вопросы…")
                 val (ok, reviewCost) = review(fresh)
                 cost += reviewCost
@@ -126,27 +254,34 @@ class QuestionGenerator(
                 questions.insertAll(
                     toSave.map { q ->
                         val s = QuestionQuality.shuffle(q)
+                        val loc = located[q]
                         QuestionDraft(
                             text = q.question,
                             options = s.options,
                             correctIndex = s.correctIndex,
                             difficulty = q.difficulty,
-                            topic = params.topic,
-                            grade = params.grade,
-                            source = QuestionSource.TOPIC,
+                            topic = unit.topic,
+                            grade = unit.grade,
+                            source = unit.source,
                             explanation = q.explanation,
                             jobId = jobId,
+                            textbookId = unit.textbookId,
+                            sectionId = unit.sectionId,
+                            quote = loc?.let { q.quote },
+                            quoteStart = loc?.start,
+                            quoteEnd = loc?.end,
                         )
                     },
                 )
             }
-            saved += toSave.size
-            progress.saved(saved, dropped, cost)
-        }
-        if (saved == 0) {
-            throw AiException("Нейросеть не смогла составить подходящие вопросы. Попробуйте уточнить тему.")
+            savedHere += toSave.size
+            totals.saved += toSave.size
+            progress.saved(totals.saved, dropped, cost)
         }
     }
+
+    private fun existingLines(existing: List<QuestionText>) =
+        existing.take(EXISTING_IN_PROMPT).map { "${it.text.take(150)} → ${it.answer.take(60)}" }
 
     /** Второй проход: возвращает одобренные вопросы и стоимость. Если рецензент сломался — пропускаем всё. */
     private suspend fun review(items: List<ParsedQuestion>): Pair<List<ParsedQuestion>, Double> {
@@ -156,7 +291,7 @@ class QuestionGenerator(
                     operation = "check",
                     system = Prompts.REVIEW_SYSTEM,
                     user = Prompts.reviewUser(items),
-                    maxTokens = 200 + 60 * items.size,
+                    maxTokens = 200 + 70 * items.size,
                     temperature = 0.1,
                 ),
             )
@@ -206,19 +341,73 @@ class QuestionGenerator(
             return counts.filterValues { it > 0 }
         }
 
+        /** Делит [total] вопросов пропорционально объёму текста [weights]; заметным кускам — хотя бы по одному. */
+        fun allocate(total: Int, weights: List<Int>): List<Int> {
+            if (weights.isEmpty()) return emptyList()
+            val sum = weights.sum().coerceAtLeast(1)
+            val raw = weights.map { it.toDouble() * total / sum }
+            val result = raw.map { it.toInt() }.toMutableList()
+            var rest = total - result.sum()
+            for (i in raw.indices.sortedByDescending { raw[it] - raw[it].toInt() }) {
+                if (rest == 0) break
+                result[i]++
+                rest--
+            }
+            for (i in result.indices) {
+                if (result[i] == 0 && weights[i] > 1500) {
+                    val donor = result.indices.maxBy { result[it] }
+                    if (result[donor] > 1) {
+                        result[donor]--
+                        result[i]++
+                    }
+                }
+            }
+            return result
+        }
+
         /**
-         * Примерная стоимость в долларах (по текущим ценам DeepSeek и времени суток).
-         * Считаем с запасом: каждый запрос просит на 3 вопроса больше.
+         * Примерная стоимость в долларах (по текущим ценам DeepSeek и времени суток), с запасом:
+         * каждый запрос просит на 3 вопроса больше. [sourceChars] — объём текста учебника в каждом
+         * куске (для генерации по теме — пусто); первый запрос по куску платит за текст полностью,
+         * следующие берут его из кэша.
          */
-        fun estimateCostUsd(total: Int, review: Boolean, existingInTopic: Int, rules: Int, now: Long = System.currentTimeMillis()): Double {
-            val batches = ceil(total / BATCH.toDouble()).toInt()
-            val asked = total + batches * 3
+        fun estimateCostUsd(
+            total: Int,
+            review: Boolean,
+            existingInTopic: Int,
+            rules: Int,
+            sourceChars: List<Int> = emptyList(),
+            now: Long = System.currentTimeMillis(),
+        ): Double {
             val system = Pricing.estimateTokens(Prompts.GENERATE_SYSTEM)
-            val variable = 120 + min(existingInTopic + total / 2, EXISTING_IN_PROMPT) * 45 + rules * 25
-            var cost = Pricing.costUsd(cacheHit = system * batches, cacheMiss = variable * batches, output = asked * 230, atMillis = now)
+            val variable = 150 + min(existingInTopic + total / 2, EXISTING_IN_PROMPT) * 45 + rules * 25
+            var cost = 0.0
+            var batchesTotal = 0
+            if (sourceChars.isEmpty()) {
+                val batches = ceil(total / BATCH.toDouble()).toInt()
+                batchesTotal = batches
+                cost += Pricing.costUsd(cacheHit = system * batches, cacheMiss = variable * batches, output = 0, atMillis = now)
+            } else {
+                val quotas = allocate(total, sourceChars)
+                for ((i, chars) in sourceChars.withIndex()) {
+                    if (quotas[i] == 0) continue
+                    val batches = ceil(quotas[i] / BATCH.toDouble()).toInt()
+                    batchesTotal += batches
+                    // Текст параграфа + вопросы учебника + словарь, ~2,6 символа на токен
+                    val source = (chars * 1.15 / 2.6).toInt()
+                    cost += Pricing.costUsd(
+                        cacheHit = system * batches + source * (batches - 1),
+                        cacheMiss = source + variable * batches,
+                        output = 0,
+                        atMillis = now,
+                    )
+                }
+            }
+            val asked = total + batchesTotal * 3
+            cost += Pricing.costUsd(0, 0, output = asked * 260, atMillis = now)
             if (review) {
                 val reviewSystem = Pricing.estimateTokens(Prompts.REVIEW_SYSTEM)
-                cost += Pricing.costUsd(reviewSystem * batches, asked * 110, asked * 25, now)
+                cost += Pricing.costUsd(reviewSystem * batchesTotal, asked * 140, asked * 25, now)
             }
             return cost
         }

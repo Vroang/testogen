@@ -26,6 +26,12 @@ import com.testogen.app.ui.rules.RulesScreen
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.ailog.AiLogScreen
 import com.testogen.app.ui.settings.SettingsScreen
+import com.testogen.app.ui.textbooks.GenerateTextbookScreen
+import com.testogen.app.ui.textbooks.PdfPageScreen
+import com.testogen.app.ui.textbooks.SectionReaderScreen
+import com.testogen.app.ui.textbooks.TextbookScreen
+import com.testogen.app.data.db.QuestionEntity
+import androidx.navigation.NavController
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -51,6 +57,18 @@ data class TopicRoute(val key: String, val title: String)
 
 @Serializable
 data class QuestionEditRoute(val id: Long = 0, val topic: String = "")
+
+@Serializable
+data class TextbookRoute(val id: Long)
+
+@Serializable
+data class ReaderRoute(val sectionId: Long, val start: Int = -1, val end: Int = -1, val query: String = "")
+
+@Serializable
+data class PdfPageRoute(val textbookId: Long, val page: Int)
+
+@Serializable
+data class GenerateTextbookRoute(val textbookId: Long, val preselect: Long = 0)
 
 /** Плавное «выразительное» замедление, как в Material 3. */
 private val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -98,6 +116,40 @@ fun AppRoot(debugTopic: String? = null) {
                 onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
                 onOpenTopic = { key, title -> nav.navigate(TopicRoute(key, title)) },
                 onOpenJob = { nav.navigate(JobRoute(it)) },
+                onOpenTextbook = { nav.navigate(TextbookRoute(it)) },
+            )
+        }
+        composable<TextbookRoute> { entry ->
+            val route = entry.toRoute<TextbookRoute>()
+            TextbookScreen(
+                textbookId = route.id,
+                onBack = { nav.popBackStack() },
+                onOpenSection = { id, start, end, query -> nav.navigate(ReaderRoute(id, start, end, query)) },
+                onGenerate = { nav.navigate(GenerateTextbookRoute(it)) },
+            )
+        }
+        composable<ReaderRoute> { entry ->
+            val route = entry.toRoute<ReaderRoute>()
+            SectionReaderScreen(
+                sectionId = route.sectionId,
+                highlightStart = route.start,
+                highlightEnd = route.end,
+                query = route.query,
+                onBack = { nav.popBackStack() },
+                onOpenPdfPage = { book, page -> nav.navigate(PdfPageRoute(book, page)) },
+            )
+        }
+        composable<PdfPageRoute> { entry ->
+            val route = entry.toRoute<PdfPageRoute>()
+            PdfPageScreen(textbookId = route.textbookId, pdfPage = route.page, onBack = { nav.popBackStack() })
+        }
+        composable<GenerateTextbookRoute> { entry ->
+            val route = entry.toRoute<GenerateTextbookRoute>()
+            GenerateTextbookScreen(
+                textbookId = route.textbookId,
+                preselect = route.preselect,
+                onBack = { nav.popBackStack() },
+                onStarted = { id -> nav.navigate(JobRoute(id)) { popUpTo<GenerateTextbookRoute> { inclusive = true } } },
             )
         }
         composable<SettingsRoute> {
@@ -129,6 +181,7 @@ fun AppRoot(debugTopic: String? = null) {
                     nav.navigate(TopicRoute(key, title)) { popUpTo<JobRoute> { inclusive = true } }
                 },
                 onEditQuestion = { nav.navigate(QuestionEditRoute(id = it)) },
+                onSource = { q -> openSource(nav, q) },
             )
         }
         composable<TopicRoute> { entry ->
@@ -140,6 +193,7 @@ fun AppRoot(debugTopic: String? = null) {
                 onGenerateMore = { nav.navigate(GenerateTopicRoute(it)) },
                 onAddManual = { nav.navigate(QuestionEditRoute(topic = it)) },
                 onEdit = { nav.navigate(QuestionEditRoute(id = it)) },
+                onSource = { q -> openSource(nav, q) },
             )
         }
         composable<QuestionEditRoute> { entry ->
@@ -152,4 +206,10 @@ fun AppRoot(debugTopic: String? = null) {
     }
 
     UpdateDialog()
+}
+
+/** «Откуда вопрос»: параграф учебника с подсвеченной цитатой. */
+private fun openSource(nav: NavController, q: QuestionEntity) {
+    val section = q.sectionId ?: return
+    nav.navigate(ReaderRoute(section, q.quoteStart ?: -1, q.quoteEnd ?: -1, if (q.quoteStart == null) q.quote.orEmpty() else ""))
 }

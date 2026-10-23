@@ -40,7 +40,7 @@ object QuestionQuality {
         for (item in items) {
             val obj = runCatching { item.jsonObject }.getOrNull() ?: continue
             val q = ParsedQuestion(
-                question = obj.str("question").cleanText(),
+                question = stripSourceRefs(obj.str("question").cleanText()),
                 correct = obj.str("correct").cleanOption(),
                 distractors = obj["distractors"]?.let { runCatching { it.jsonArray }.getOrNull() }
                     ?.mapNotNull { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull()?.cleanOption() }
@@ -75,6 +75,16 @@ object QuestionQuality {
         val correctNorm = normalize(q.correct)
         if (correctNorm.length >= 6 && normalize(q.question).contains(correctNorm)) return "ответ подсказан в вопросе"
         return null
+    }
+
+    private val SOURCE_REF = Regex("""(?iu)(,\s*)?(согласно|по)\s+тексту(\s+учебника|\s+параграфа)?(\s*,)?\s+""")
+    private val IN_TEXT = Regex("""(?iu)\s+(в|из)\s+тексте?(\s+учебника|\s+параграфа)?(?=[\s,?])""")
+
+    /** Убирает «согласно тексту учебника», «в тексте» — для школьника в бумажном тесте они лишние. */
+    fun stripSourceRefs(q: String): String {
+        val s = q.replace(SOURCE_REF, " ").replace(IN_TEXT, "")
+            .replace(Regex("""\s+([?,.])"""), "$1").replace(Regex("""\s{2,}"""), " ").trim()
+        return s.replaceFirstChar { it.uppercaseChar() }
     }
 
     /** Перемешивает варианты: позиция верного ответа случайна. */

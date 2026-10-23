@@ -9,6 +9,17 @@ private val ru = Locale.forLanguageTag("ru")
 /** «23 окт., 14:05». */
 fun formatDate(millis: Long): String = SimpleDateFormat("d MMM, HH:mm", ru).format(Date(millis))
 
+/** Цена в долларах и рублях: «$0,0023 · 0,24 ₽». [rate] — рублей за доллар. */
+fun formatMoney(usd: Double, rate: Double): String = "${formatUsd(usd)} · ${formatRub(usd * rate)}"
+
+/** Рубли: копейки видны, но без лишних знаков. */
+fun formatRub(rub: Double): String = when {
+    rub == 0.0 -> "0 ₽"
+    rub < 0.01 -> "меньше копейки"
+    rub < 100 -> String.format(ru, "%.2f ₽", rub)
+    else -> String.format(ru, "%.0f ₽", rub)
+}
+
 /** Доллары с точностью, видимой даже для копеечных запросов: «$0,0012», «$1,25». */
 fun formatUsd(value: Double): String = when {
     value == 0.0 -> "$0"

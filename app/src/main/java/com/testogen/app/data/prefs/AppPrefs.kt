@@ -2,6 +2,7 @@ package com.testogen.app.data.prefs
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +17,13 @@ class AppPrefs(private val context: Context) {
     /** Перепроверять вопросы вторым проходом нейросети. */
     val review: Flow<Boolean> = context.prefsStore.data.map { it[REVIEW] ?: true }
 
+    /** Курс доллара в рублях для показа цен (по умолчанию — курс сервиса оплаты). */
+    val usdRate: Flow<Double> = context.prefsStore.data.map { it[RATE] ?: DEFAULT_RATE }
+
+    suspend fun setUsdRate(value: Double) {
+        context.prefsStore.edit { it[RATE] = value }
+    }
+
     suspend fun setLastGrade(grade: Int?) {
         context.prefsStore.edit { it[GRADE] = grade ?: 0 }
     }
@@ -24,8 +32,10 @@ class AppPrefs(private val context: Context) {
         context.prefsStore.edit { it[REVIEW] = value }
     }
 
-    private companion object {
-        val GRADE = intPreferencesKey("last_grade")
-        val REVIEW = booleanPreferencesKey("review_questions")
+    companion object {
+        const val DEFAULT_RATE = 103.0
+        private val RATE = doublePreferencesKey("usd_rate")
+        private val GRADE = intPreferencesKey("last_grade")
+        private val REVIEW = booleanPreferencesKey("review_questions")
     }
 }

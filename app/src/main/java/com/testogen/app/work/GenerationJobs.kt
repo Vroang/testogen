@@ -23,7 +23,10 @@ import com.testogen.app.R
 import com.testogen.app.TestoGenApp
 import com.testogen.app.ai.AiException
 import com.testogen.app.ai.GenerationProgress
+import com.testogen.app.ai.TextbookJobParams
 import com.testogen.app.ai.TopicJobParams
+import com.testogen.app.textbook.ImportException
+import com.testogen.app.textbook.ImportJobParams
 import com.testogen.app.data.db.AppDatabase
 import com.testogen.app.data.db.GenerationJobEntity
 import kotlinx.coroutines.CancellationException
@@ -40,6 +43,42 @@ class GenerationJobs(private val context: Context, private val db: AppDatabase) 
     fun observe(id: Long): Flow<GenerationJobEntity?> = db.jobs().observe(id)
 
     fun observeActive(): Flow<List<GenerationJobEntity>> = db.jobs().observeActive()
+
+    suspend fun startImport(textbookId: Long, title: String): Long {
+        val now = System.currentTimeMillis()
+        val id = db.jobs().insert(
+            GenerationJobEntity(
+                kind = KIND_IMPORT,
+                status = "queued",
+                params = json.encodeToString(ImportJobParams.serializer(), ImportJobParams(textbookId)),
+                title = title,
+                total = 0,
+                stage = "Открываю учебник…",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        enqueue(id, ExistingWorkPolicy.REPLACE, needsNetwork = false)
+        return id
+    }
+
+    suspend fun startTextbook(params: TextbookJobParams, title: String): Long {
+        val now = System.currentTimeMillis()
+        val id = db.jobs().insert(
+            GenerationJobEntity(
+                kind = KIND_TEXTBOOK,
+                status = "queued",
+                params = json.encodeToString(TextbookJobParams.serializer(), params),
+                title = title,
+                total = params.total,
+                stage = "Готовлю задание…",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        enqueue(id, ExistingWorkPolicy.REPLACE)
+        return id
+    }
 
     suspend fun startTopic(params: TopicJobParams): Long {
         val now = System.currentTimeMillis()
@@ -73,13 +112,13 @@ class GenerationJobs(private val context: Context, private val db: AppDatabase) 
     /** При запуске приложения: незавершённые задания снова ставятся в очередь (если их там уже нет). */
     suspend fun resumeUnfinished() {
         db.jobs().deleteFinishedBefore(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
-        db.jobs().active().forEach { enqueue(it.id, ExistingWorkPolicy.KEEP) }
+        db.jobs().active().forEach { enqueue(it.id, ExistingWorkPolicy.KEEP, needsNetwork = it.kind != KIND_IMPORT) }
     }
 
-    private fun enqueue(id: Long, policy: ExistingWorkPolicy) {
+    private fun enqueue(id: Long, policy: ExistingWorkPolicy, needsNetwork: Boolean = true) {
         val request = OneTimeWorkRequestBuilder<GenerationWorker>()
             .setInputData(workDataOf(KEY_JOB to id))
-            .setConstraints(Constraints(requiredNetworkType = NetworkType.CONNECTED))
+            .setConstraints(Constraints(requiredNetworkType = if (needsNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED))
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(workName(id), policy, request)
@@ -87,6 +126,8 @@ class GenerationJobs(private val context: Context, private val db: AppDatabase) 
 
     companion object {
         const val KIND_TOPIC = "topic"
+        const val KIND_TEXTBOOK = "textbook"
+        const val KIND_IMPORT = "import"
         const val KEY_JOB = "job"
         fun workName(id: Long) = "generation-$id"
     }
@@ -104,7 +145,7 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val job = db.jobs().get(jobId) ?: return Result.success()
         if (job.status == "done" || job.status == "cancelled") return Result.success()
 
-        runCatching { setForeground(foregroundInfo(job.title, job.saved, job.total)) }
+        runCatching { setForeground(foregroundInfo(job.kind, job.title, job.saved, job.total)) }
         db.jobs().setStatus(jobId, "running", "Готовлю задание…", null)
 
         val progress = object : GenerationProgress {
@@ -114,7 +155,7 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
 
             override suspend fun saved(totalSaved: Int, dropped: Int, costUsd: Double) {
                 db.jobs().addProgress(jobId, totalSaved, dropped, costUsd)
-                runCatching { setForeground(foregroundInfo(job.title, totalSaved, job.total)) }
+                runCatching { setForeground(foregroundInfo(job.kind, job.title, totalSaved, job.total)) }
             }
         }
 
@@ -123,6 +164,16 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 GenerationJobs.KIND_TOPIC -> container.generator.runTopic(
                     jobId,
                     json.decodeFromString(TopicJobParams.serializer(), job.params),
+                    progress,
+                )
+                GenerationJobs.KIND_TEXTBOOK -> container.generator.runTextbook(
+                    jobId,
+                    json.decodeFromString(TextbookJobParams.serializer(), job.params),
+                    progress,
+                )
+                GenerationJobs.KIND_IMPORT -> container.importer.run(
+                    json.decodeFromString(ImportJobParams.serializer(), job.params),
+                    jobId,
                     progress,
                 )
                 else -> error("Неизвестный вид задания: ${job.kind}")
@@ -138,6 +189,9 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
         } catch (e: AiException) {
             db.jobs().setStatus(jobId, "failed", "Ошибка", e.message)
             Result.failure()
+        } catch (e: ImportException) {
+            db.jobs().setStatus(jobId, "failed", "Ошибка", e.message)
+            Result.failure()
         } catch (e: Exception) {
             db.jobs().setStatus(jobId, "failed", "Ошибка", "Что-то пошло не так: ${e.message ?: e.javaClass.simpleName}")
             Result.failure()
@@ -146,10 +200,10 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val job = container.database.jobs().get(jobId)
-        return foregroundInfo(job?.title.orEmpty(), job?.saved ?: 0, job?.total ?: 0)
+        return foregroundInfo(job?.kind.orEmpty(), job?.title.orEmpty(), job?.saved ?: 0, job?.total ?: 0)
     }
 
-    private fun foregroundInfo(title: String, saved: Int, total: Int): ForegroundInfo {
+    private fun foregroundInfo(kind: String, title: String, saved: Int, total: Int): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
@@ -164,8 +218,14 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
         )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Создаю вопросы: $title")
-            .setContentText(if (total > 0) "Готово $saved из $total" else "Готовлю задание…")
+            .setContentTitle(if (kind == GenerationJobs.KIND_IMPORT) "Читаю учебник: $title" else "Создаю вопросы: $title")
+            .setContentText(
+                when {
+                    total == 0 -> "Готовлю задание…"
+                    kind == GenerationJobs.KIND_IMPORT -> "Страница $saved из $total"
+                    else -> "Готово $saved из $total"
+                },
+            )
             .setProgress(total.coerceAtLeast(1), saved, total == 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

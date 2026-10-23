@@ -44,7 +44,9 @@ import com.testogen.app.BuildConfig
 import com.testogen.app.ai.AiClient
 import com.testogen.app.ai.AiException
 import com.testogen.app.ai.Provider
+import com.testogen.app.data.prefs.AppPrefs
 import com.testogen.app.data.prefs.KeysRepository
+import com.testogen.app.ui.money
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.components.BackHeader
 import com.testogen.app.ui.components.IconBadge
@@ -56,24 +58,36 @@ import com.testogen.app.ui.theme.Palette
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-class SettingsViewModel(private val keys: KeysRepository, private val ai: AiClient) : ViewModel() {
+class SettingsViewModel(private val keys: KeysRepository, private val ai: AiClient, private val prefs: AppPrefs) : ViewModel() {
     var deepSeek by mutableStateOf("")
         private set
     var openRouter by mutableStateOf("")
         private set
     var loaded by mutableStateOf(false)
         private set
+    /** Курс доллара в поле ввода (как набрано). */
+    var rateText by mutableStateOf("")
+        private set
 
     init {
         viewModelScope.launch {
             deepSeek = keys.deepSeekKey.first()
             openRouter = keys.openRouterKey.first()
+            rateText = formatRate(prefs.usdRate.first())
             loaded = true
         }
     }
 
+    fun onRateChange(raw: String) {
+        rateText = raw.filter { it.isDigit() || it == ',' || it == '.' }.take(7)
+        val value = rateText.replace(',', '.').toDoubleOrNull()
+        if (value != null && value in 1.0..10_000.0) viewModelScope.launch { prefs.setUsdRate(value) }
+    }
+
+    private fun formatRate(v: Double) = if (v % 1.0 == 0.0) v.toLong().toString() else v.toString().replace('.', ',')
+
     /** Итог проверки ключа: текст и успех. */
-    var checks by mutableStateOf<Map<Provider, Pair<String, Boolean>>>(emptyMap())
+    var checks by mutableStateOf<Map<Provider, CheckResult>>(emptyMap())
         private set
     var checking by mutableStateOf<Provider?>(null)
         private set
@@ -98,9 +112,9 @@ class SettingsViewModel(private val keys: KeysRepository, private val ai: AiClie
             if (provider == Provider.DEEPSEEK) keys.setDeepSeekKey(deepSeek) else keys.setOpenRouterKey(openRouter)
             val result = try {
                 val balance = ai.balance(provider)
-                (balance?.let { "Ключ работает, ${it.text}" } ?: "Ключ не задан") to (balance != null)
+                if (balance == null) CheckResult("Ключ не задан", null, false) else CheckResult("Ключ работает", balance.usd, true)
             } catch (e: AiException) {
-                (e.message ?: "Ошибка") to false
+                CheckResult(e.message ?: "Ошибка", null, false)
             }
             checks = checks + (provider to result)
             checking = null
@@ -111,7 +125,7 @@ class SettingsViewModel(private val keys: KeysRepository, private val ai: AiClie
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit, onOpenRules: () -> Unit) {
     val container = LocalAppContainer.current
-    val vm: SettingsViewModel = viewModel { SettingsViewModel(container.keys, container.ai) }
+    val vm: SettingsViewModel = viewModel { SettingsViewModel(container.keys, container.ai, container.prefs) }
     val pad = LocalDimens.current.screenPadding
 
     LazyColumn(
@@ -160,6 +174,32 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit, onOpenRules: () 
                 )
             }
         }
+        item(key = "rate") {
+            SoftCard(Modifier.fillMaxWidth().padding(horizontal = pad)) {
+                Text("Курс доллара", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Цены нейросети приходят в долларах; по этому курсу приложение показывает и рубли.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = vm.rateText,
+                    onValueChange = vm::onRateChange,
+                    enabled = vm.loaded,
+                    singleLine = true,
+                    suffix = { Text("₽ за 1 $") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    shape = MaterialTheme.shapes.small,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = Palette.Background,
+                        focusedContainerColor = Palette.Surface,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         item(key = "rules") {
             NavRow(AppIcons.Quiz, "Правила для нейросети", "Чего не делать при создании вопросов", onOpenRules, Modifier.padding(horizontal = pad))
         }
@@ -200,7 +240,7 @@ private fun KeyField(
     enabled: Boolean,
     onChange: (String) -> Unit,
     checking: Boolean,
-    check: Pair<String, Boolean>?,
+    check: CheckResult?,
     onCheck: () -> Unit,
 ) {
     var visible by rememberSaveable { mutableStateOf(false) }
@@ -231,9 +271,13 @@ private fun KeyField(
     if (value.isNotEmpty()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onCheck, enabled = !checking) { Text(if (checking) "Проверяю…" else "Проверить ключ") }
-            check?.let { (text, ok) ->
-                Text(text, style = MaterialTheme.typography.bodyMedium, color = if (ok) Palette.Primary else Palette.Error, modifier = Modifier.weight(1f))
+            check?.let { c ->
+                val text = if (c.usd != null) "${c.text}, на счёте ${money(c.usd)}" else c.text
+                Text(text, style = MaterialTheme.typography.bodyMedium, color = if (c.ok) Palette.Primary else Palette.Error, modifier = Modifier.weight(1f))
             }
         }
     }
 }
+
+/** Итог проверки ключа. */
+data class CheckResult(val text: String, val usd: Double?, val ok: Boolean)

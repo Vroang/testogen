@@ -26,6 +26,11 @@ data class QuestionDraft(
     val source: QuestionSource,
     val explanation: String? = null,
     val jobId: Long? = null,
+    val textbookId: Long? = null,
+    val sectionId: Long? = null,
+    val quote: String? = null,
+    val quoteStart: Int? = null,
+    val quoteEnd: Int? = null,
 )
 
 class QuestionRepository(private val db: AppDatabase) {
@@ -51,6 +56,12 @@ class QuestionRepository(private val db: AppDatabase) {
             explanation = draft.explanation?.trim()?.ifBlank { null },
             dedupKey = QuestionQuality.normalize(draft.text),
             jobId = draft.jobId,
+            textbookId = draft.textbookId,
+            sectionId = draft.sectionId,
+            quote = draft.quote,
+            quoteStart = draft.quoteStart,
+            quoteEnd = draft.quoteEnd,
+            quoteStatus = if (draft.quoteStart != null) 1 else 0,
             createdAt = createdAt,
             updatedAt = now,
         )

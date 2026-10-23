@@ -57,6 +57,14 @@ class QuestionQualityTest {
     }
 
     @Test
+    fun removesReferencesToTextbookText() {
+        assertEquals("Что является общепризнанным эквивалентом?", QuestionQuality.stripSourceRefs("Что, согласно тексту, является общепризнанным эквивалентом?"))
+        assertEquals("Какой вид ответственности назван самым суровым?", QuestionQuality.stripSourceRefs("Какой вид ответственности в тексте назван самым суровым?"))
+        assertEquals("Кто сформулировал патриархальную теорию?", QuestionQuality.stripSourceRefs("Кто, согласно тексту учебника, сформулировал патриархальную теорию?"))
+        assertEquals("Как называется налог?", QuestionQuality.stripSourceRefs("Как называется налог?"))
+    }
+
+    @Test
     fun shuffleKeepsCorrectAnswerAndMovesIt() {
         val positions = (0 until 200).map { QuestionQuality.shuffle(q(), Random(it)) }
         positions.forEach { assertEquals("1242", it.options[it.correctIndex]) }

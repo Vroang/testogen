@@ -7,6 +7,10 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.testogen.app.data.prefs.AppPrefs
+import com.testogen.app.ui.LocalUsdRate
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.main.AppRoot
 import com.testogen.app.ui.theme.TestoGenTheme
@@ -21,7 +25,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as TestoGenApp).container
         setContent {
-            CompositionLocalProvider(LocalAppContainer provides container) {
+            val rate by container.prefs.usdRate.collectAsState(initial = AppPrefs.DEFAULT_RATE)
+            CompositionLocalProvider(LocalAppContainer provides container, LocalUsdRate provides rate) {
                 TestoGenTheme {
                     // Только в debug-сборке: открыть генерацию с готовой темой из adb
                     // (adb не умеет вводить кириллицу): am start ... --es debug_topic "Тема"
