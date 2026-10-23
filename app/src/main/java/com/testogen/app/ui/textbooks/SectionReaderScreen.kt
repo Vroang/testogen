@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -93,7 +94,7 @@ class ReaderViewModel(
     var items by mutableStateOf<List<ReaderItem>>(emptyList())
         private set
     /** Индекс строки с подсветкой — к ней прокручивается экран. */
-    var focusIndex by mutableStateOf(-1)
+    var focusIndex by mutableIntStateOf(-1)
         private set
 
     init {

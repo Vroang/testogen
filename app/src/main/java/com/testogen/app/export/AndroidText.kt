@@ -1,5 +1,6 @@
 package com.testogen.app.export
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
 import android.text.Layout
@@ -21,6 +22,8 @@ class AndroidText(context: Context) : TextMeasurer {
     fun typeface(isBold: Boolean) = if (isBold) bold else regular
 
     /** Строки, на которые разобьётся текст при ширине [widthPt] (пункты) и размере [sizePt]. */
+    // Layout.BREAK_STRATEGY_SIMPLE равна LineBreaker.BREAK_STRATEGY_SIMPLE, но LineBreaker есть только с API 29
+    @SuppressLint("WrongConstant")
     fun breakLines(text: String, widthPt: Float, sizePt: Float, isBold: Boolean): List<String> {
         if (text.isEmpty()) return listOf("")
         val key = "$isBold|$sizePt|$widthPt|$text"

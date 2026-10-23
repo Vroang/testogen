@@ -205,7 +205,7 @@ class GenerationWorker(context: Context, params: WorkerParameters) : CoroutineWo
 
     private fun foregroundInfo(kind: String, title: String, saved: Int, total: Int): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL) == null) {
+        if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL, "Создание вопросов", NotificationManager.IMPORTANCE_LOW),
             )

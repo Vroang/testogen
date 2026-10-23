@@ -27,6 +27,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,15 +49,15 @@ import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.components.AppTextField
 import com.testogen.app.ui.components.BackHeader
 import com.testogen.app.ui.components.ChoicePill
-import com.testogen.app.ui.components.GradePicker
 import com.testogen.app.ui.components.CountStepper
+import com.testogen.app.ui.components.GradePicker
 import com.testogen.app.ui.components.PrimaryButton
 import com.testogen.app.ui.components.SecondaryButton
 import com.testogen.app.ui.components.SoftCard
+import com.testogen.app.ui.money
 import com.testogen.app.ui.theme.AppIcons
 import com.testogen.app.ui.theme.LocalDimens
 import com.testogen.app.ui.theme.Palette
-import com.testogen.app.ui.money
 import com.testogen.app.util.plural
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -64,7 +65,7 @@ import kotlinx.coroutines.launch
 class GenerateTopicViewModel(private val c: AppContainer, initialTopic: String) : ViewModel() {
     var topic by mutableStateOf(initialTopic)
     var grade by mutableStateOf<Int?>(null)
-    var count by mutableStateOf(20)
+    var count by mutableIntStateOf(20)
     var difficulties by mutableStateOf(setOf(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD))
     var review by mutableStateOf(true)
     var suggestions by mutableStateOf<List<String>>(emptyList())

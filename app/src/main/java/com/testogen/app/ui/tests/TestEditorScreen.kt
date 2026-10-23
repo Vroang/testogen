@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -110,7 +111,7 @@ class TestEditorViewModel(private val c: AppContainer, private val testId: Long)
         private set
     var replaceState by mutableStateOf<ReplaceState>(ReplaceState.Choosing)
         private set
-    var lastCost by mutableStateOf(0.0)
+    var lastCost by mutableDoubleStateOf(0.0)
         private set
 
     fun remove(slot: TestSlot) = viewModelScope.launch { c.tests.removeItem(slot.item) }

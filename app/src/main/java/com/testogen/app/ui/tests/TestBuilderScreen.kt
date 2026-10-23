@@ -28,6 +28,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,7 +81,7 @@ class TestBuilderViewModel(private val c: AppContainer) : ViewModel() {
         private set
     var title by mutableStateOf("")
     private var titleEdited = false
-    var variants by mutableStateOf(2)
+    var variants by mutableIntStateOf(2)
     var perVariant by mutableStateOf(10)
     var difficulties by mutableStateOf(setOf(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD))
         private set

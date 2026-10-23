@@ -288,10 +288,9 @@ abstract class AppDatabase : RoomDatabase() {
         const val NAME = "testogen2.db"
 
         fun create(context: Context): AppDatabase =
+            // Этап 6: данные мамы ценны — при изменении структуры писать миграции (addMigrations),
+            // схемы лежат в app/schemas. Пересоздание базы с потерей данных запрещено.
             Room.databaseBuilder(context, AppDatabase::class.java, NAME)
-                // До первого релиза новой версии структура базы ещё меняется — данные не ценны.
-                // Перед релизом (этап 6) убрать и дальше писать миграции.
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }
 }

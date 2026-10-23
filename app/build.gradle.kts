@@ -18,13 +18,14 @@ android {
         targetSdk = 37
         // versionCode растёт монотонно; тег релиза v<versionCode> (старая ветка закончилась на 49)
         versionCode = 50
-        versionName = "2.0-dev"
+        versionName = "2.0"
     }
 
+    // Подпись релиза: на CI параметры приходят из GitHub Secrets. Локально без них release
+    // собирается неподписанным — только чтобы проверить R8 и размер.
+    val hasReleaseKey = System.getenv("KEYSTORE_PASSWORD") != null
     signingConfigs {
         create("release") {
-            // На CI параметры приходят из GitHub Secrets;
-            // локально release без env остаётся неподписанным.
             val storePath = System.getenv("KEYSTORE_PATH") ?: "release.keystore"
             storeFile = file(storePath)
             storePassword = System.getenv("KEYSTORE_PASSWORD")
@@ -41,7 +42,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
         }
         // Как release (R8, без отладки), но с debug-подписью — для замеров плавности
         // на телефоне и для Baseline Profile. Маме не отдаётся.
@@ -61,6 +62,21 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        // BouncyCastle (зависимость pdfbox): таблицы постквантовой криптографии — ~8 МБ, PDF они не нужны
+        resources.excludes += "org/bouncycastle/pqc/**"
+    }
+
+    androidResources {
+        // Таблицы китайских, японских и корейских кодировок pdfbox — русским учебникам не нужны
+        // (Identity-H/V остаются). Первая часть — стандартный список исключений.
+        ignoreAssetsPatterns += listOf(
+            "!.svn", "!.git", "!.ds_store", "!*.scc", ".*", "<dir>_*", "!CVS", "!thumbs.db", "!picasa.ini", "!*~",
+            "!83pv-*", "!90ms*", "!90pv-*", "!Add-*", "!Adobe-*", "!B5pc-*", "!CNS-*", "!ETen*", "!EUC-*", "!Ext-*",
+            "!GB*", "!HKscs-*", "!KSC*", "!Uni*", "!H", "!V",
+        )
     }
 }
 

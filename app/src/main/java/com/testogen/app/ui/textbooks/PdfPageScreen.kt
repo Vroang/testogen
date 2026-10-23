@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,11 +46,11 @@ import com.testogen.app.ui.components.BackHeader
 import com.testogen.app.ui.components.SecondaryButton
 import com.testogen.app.ui.components.SkeletonCard
 import com.testogen.app.ui.theme.Palette
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /** Оригинальная страница PDF, отрисованная системным PdfRenderer (без сторонних библиотек). */
 class PdfPageViewModel(private val c: AppContainer, private val textbookId: Long, startPage: Int, private val widthPx: Int) : ViewModel() {
@@ -58,7 +59,7 @@ class PdfPageViewModel(private val c: AppContainer, private val textbookId: Long
     private var renderer: PdfRenderer? = null
     private var pageMap: List<Int?> = emptyList()
 
-    var page by mutableStateOf(startPage)
+    var page by mutableIntStateOf(startPage)
         private set
     var pageCount by mutableStateOf(0)
         private set

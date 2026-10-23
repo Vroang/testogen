@@ -165,7 +165,7 @@ object TxtExtractor {
         Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes)).toString().removePrefix("﻿")
+            .decode(ByteBuffer.wrap(bytes)).toString().removePrefix(Char(0xFEFF).toString())
     } catch (e: CharacterCodingException) {
         String(bytes, Charset.forName("windows-1251"))
     }

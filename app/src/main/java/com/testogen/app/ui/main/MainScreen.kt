@@ -13,14 +13,10 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -34,7 +30,6 @@ import com.testogen.app.ui.tests.TestsScreen
 import com.testogen.app.ui.textbooks.TextbooksScreen
 import com.testogen.app.ui.theme.AppIcons
 import com.testogen.app.ui.theme.Palette
-import kotlinx.coroutines.launch
 
 enum class Tab(val label: String, val icon: () -> ImageVector) {
     TESTS("Тесты", { AppIcons.Document }),
@@ -56,16 +51,10 @@ fun MainScreen(
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.TESTS) }
     val stateHolder = rememberSaveableStateHolder()
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val showMessage: (String) -> Unit = remember {
-        { text -> scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(text) } }
-    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0),
-        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(
                 containerColor = Palette.Surface,

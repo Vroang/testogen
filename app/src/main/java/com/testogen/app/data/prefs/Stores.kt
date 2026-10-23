@@ -40,6 +40,6 @@ class KeysRepository(private val context: Context) {
         private val OPENROUTER = stringPreferencesKey("openrouter_key")
 
         /** Ключ без пробелов, переводов строк и невидимых символов (часто прилипают при вставке). */
-        fun cleanKey(raw: String): String = raw.filterNot { it.isWhitespace() || it == '​' || it == '﻿' }
+        fun cleanKey(raw: String): String = raw.filterNot { it.isWhitespace() || it == Char(0x200B) || it == Char(0xFEFF) }
     }
 }

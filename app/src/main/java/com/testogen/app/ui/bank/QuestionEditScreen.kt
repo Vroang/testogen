@@ -23,6 +23,7 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -60,7 +61,7 @@ class QuestionEditViewModel(private val c: AppContainer, private val id: Long, d
     var grade by mutableStateOf<Int?>(null)
     var text by mutableStateOf("")
     val options = mutableStateListOf("", "", "", "")
-    var correct by mutableStateOf(0)
+    var correct by mutableIntStateOf(0)
     var difficulty by mutableStateOf(Difficulty.MEDIUM)
     var explanation by mutableStateOf("")
     var error by mutableStateOf<String?>(null)

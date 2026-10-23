@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,7 +73,7 @@ class GenerateTextbookViewModel(private val c: AppContainer, private val textboo
     /** Объём материала для нейросети по каждому разделу (символов). */
     private var sourceChars = emptyMap<Long, List<Int>>()
     var selected by mutableStateOf(if (preselect > 0) setOf(preselect) else emptySet())
-    var count by mutableStateOf(20)
+    var count by mutableIntStateOf(20)
     var difficulties by mutableStateOf(setOf(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD))
     var review by mutableStateOf(true)
     var includeSide by mutableStateOf(true)

@@ -38,8 +38,10 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p output
+          # Без ключей Gradle собирает app-release-unsigned.apk — такой выкладывать нельзя.
+          # Явный путь к подписанному файлу: если его нет, шаг упадёт и релиз не создастся.
           # GitHub вырезает кириллицу из имён файлов релиза, поэтому латиницей
-          cp app/build/outputs/apk/release/*.apk "output/Testogen-${{ github.ref_name }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "output/Testogen-${{ github.ref_name }}.apk"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
