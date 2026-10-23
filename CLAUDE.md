@@ -38,12 +38,15 @@ Android-приложение для одного пользователя (ма�
 | `work/GenerationJobs.kt` | Задания генерации в базе + `GenerationWorker` (WorkManager, foreground-уведомление); при запуске приложения незавершённые задания продолжаются |
 | `textbook/` | `TextbookAnalyzer` (структура по оформлению, сверка с оглавлением; тест на настоящем учебнике по выгрузкам из `examples/`, см. `tools/README.md`), `Extractors` (PDF — pdfbox-android, DOCX, TXT), `TextbookImporter`, `QuoteMatcher` (нестрогий поиск цитаты), `SectionText` |
 | `data/db/TextbookEntities.kt` | Учебники, главы, разделы, блоки текста, словарь + `TextbookDao` (поиск, разделить/соединить) |
+| `export/` | `DocxBuilder` (docx без библиотек), `Paginator` (раскладка как в Word, авто-выбор), `AndroidText` (Liberation Serif = метрики TNR, без кернинга/хинтинга), `DocLayout`. Сверка с LibreOffice: `soffice --headless --convert-to pdf` |
+| `data/TestBuilder.kt`, `data/TestRepository.kt` | Раскладка вопросов по вариантам; тесты в базе |
 | `data/QuestionRepository.kt` | Сохранение вопросов, `topicKey`/`cleanTopic` |
 | `update/Updater.kt` | Автообновление из GitHub Releases (`StateFlow` состояния, диалог в `ui/main/UpdateDialog.kt`) |
 | `ui/theme/` | Только светлая тёплая палитра (`Palette`), шрифт Golos Text (`res/font`, OFL — `licenses/`), типографика крупнее стандартной, `AppIcons` — свои векторные иконки |
 | `ui/components/` | Общие элементы: `SoftCard`, `PrimaryButton`, `SecondaryButton`, `ScreenHeader`, `BackHeader`, `EmptyState`, `DifficultyTag` |
 | `ui/main/` | `AppRoot` (NavHost, type-safe маршруты, переходы), `MainScreen` (вкладки Тесты / Вопросы / Учебники) |
-| `ui/tests`, `ui/bank`, `ui/generate`, `ui/rules`, `ui/textbooks` (список, структура, чтение, страница PDF, генерация), `ui/settings`, `ui/ailog` | Экраны; ViewModel рядом с экраном, создаётся через `viewModel { … }` |
+| `ui/export` | Предпросмотр и файлы теста |
+| `ui/tests` (список, «Новый тест», экран теста с заменой), `ui/bank`, `ui/generate`, `ui/rules`, `ui/textbooks` (список, структура, чтение, страница PDF, генерация), `ui/settings`, `ui/ailog` | Экраны; ViewModel рядом с экраном, создаётся через `viewModel { … }` |
 | `util/Format.kt` | Даты, доллары, русское склонение |
 
 Плавность: тяжёлое — только вне главного потока; ленивые списки с `key` и `contentType`;
@@ -82,7 +85,8 @@ Release с подписью собирает только GitHub Actions (`.gith
   `adb shell am start -S --user 0 -n com.testogen.app/.MainActivity --es debug_topic "'Тема'"`.
   Базу debug-сборки можно читать через `run-as` (в benchmark — нельзя).
 - В Git Bash для adb ставить `MSYS_NO_PATHCONV=1` (иначе `/data/...` превращается в путь Windows).
-- Play Protect спрашивает о проверке при каждой установке по adb — ставить реже, правки собирать пачками.
+- Play Protect спрашивает о проверке при каждой установке по adb — пользователь хотел разрешать проверку:
+  в окне нажимать «Проверить это приложение» (не «Проверять все неизвестные приложения»). Правки собирать пачками.
 - Юнит-тесты: `./gradlew testDebugUnitTest`.
 - Учебник для проверки импорта лежит на телефоне: `/sdcard/Download/Obshchestvoznanie_9.pdf`
   (в системном выборе файла — «Найти» → «Obshchestvoznanie»).
