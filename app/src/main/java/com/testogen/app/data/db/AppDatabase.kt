@@ -54,8 +54,64 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE topicKey = :topicKey ORDER BY createdAt DESC")
     fun observeByTopic(topicKey: String): Flow<List<QuestionEntity>>
 
-    @Query("SELECT dedupKey FROM questions WHERE topicKey = :topicKey")
-    suspend fun dedupKeysByTopic(topicKey: String): List<String>
+    /** Текст вопроса и верный ответ — для отсева похожих. */
+    @Query(
+        "SELECT text, CASE correctIndex WHEN 0 THEN option1 WHEN 1 THEN option2 WHEN 2 THEN option3 ELSE option4 END AS answer " +
+            "FROM questions WHERE topicKey = :topicKey ORDER BY createdAt DESC",
+    )
+    suspend fun textsByTopic(topicKey: String): List<QuestionText>
+
+    @Query("SELECT * FROM questions WHERE jobId = :jobId ORDER BY createdAt")
+    fun observeByJob(jobId: Long): Flow<List<QuestionEntity>>
+
+    @Query("SELECT COUNT(*) FROM questions WHERE jobId = :jobId")
+    suspend fun countByJob(jobId: Long): Int
+
+    @Query("SELECT difficulty AS code, COUNT(*) AS count FROM questions WHERE jobId = :jobId GROUP BY difficulty")
+    suspend fun difficultyCountsByJob(jobId: Long): List<CodeCount>
+
+    @Query("SELECT MIN(topic) FROM questions GROUP BY topicKey ORDER BY MAX(updatedAt) DESC LIMIT 30")
+    suspend fun recentTopics(): List<String>
+}
+
+data class QuestionText(val text: String, val answer: String)
+
+data class CodeCount(val code: Int, val count: Int)
+
+@Dao
+interface GenerationJobDao {
+    @Insert
+    suspend fun insert(job: GenerationJobEntity): Long
+
+    @Query("SELECT * FROM generation_jobs WHERE id = :id")
+    suspend fun get(id: Long): GenerationJobEntity?
+
+    @Query("SELECT * FROM generation_jobs WHERE id = :id")
+    fun observe(id: Long): Flow<GenerationJobEntity?>
+
+    @Query("SELECT * FROM generation_jobs WHERE status IN ('queued', 'running') ORDER BY createdAt")
+    fun observeActive(): Flow<List<GenerationJobEntity>>
+
+    @Query("SELECT * FROM generation_jobs WHERE status IN ('queued', 'running')")
+    suspend fun active(): List<GenerationJobEntity>
+
+    @Query("UPDATE generation_jobs SET status = :status, stage = :stage, error = :error, updatedAt = :now WHERE id = :id")
+    suspend fun setStatus(id: Long, status: String, stage: String, error: String?, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE generation_jobs SET stage = :stage, updatedAt = :now WHERE id = :id")
+    suspend fun setStage(id: Long, stage: String, now: Long = System.currentTimeMillis())
+
+    @Query(
+        "UPDATE generation_jobs SET saved = :saved, dropped = dropped + :dropped, costUsd = costUsd + :cost, " +
+            "updatedAt = :now WHERE id = :id",
+    )
+    suspend fun addProgress(id: Long, saved: Int, dropped: Int, cost: Double, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE generation_jobs SET costUsd = costUsd + :cost WHERE id = :id")
+    suspend fun addCost(id: Long, cost: Double)
+
+    @Query("DELETE FROM generation_jobs WHERE status IN ('done', 'failed', 'cancelled') AND updatedAt < :before")
+    suspend fun deleteFinishedBefore(before: Long)
 }
 
 @Dao
@@ -98,6 +154,9 @@ interface AiRuleDao {
 
     @Query("SELECT * FROM ai_rules WHERE active = 1 ORDER BY createdAt")
     suspend fun active(): List<AiRuleEntity>
+
+    @Query("SELECT * FROM ai_rules ORDER BY createdAt")
+    suspend fun all(): List<AiRuleEntity>
 }
 
 @Dao
@@ -107,6 +166,9 @@ interface ReplacementReasonDao {
 
     @Query("SELECT * FROM replacement_reasons WHERE processed = 0 ORDER BY createdAt")
     suspend fun unprocessed(): List<ReplacementReasonEntity>
+
+    @Query("SELECT COUNT(*) FROM replacement_reasons WHERE processed = 0")
+    fun observeUnprocessedCount(): Flow<Int>
 
     @Query("UPDATE replacement_reasons SET processed = 1 WHERE id IN (:ids)")
     suspend fun markProcessed(ids: List<Long>)
@@ -135,8 +197,9 @@ interface AiRequestDao {
         AiRuleEntity::class,
         ReplacementReasonEntity::class,
         AiRequestEntity::class,
+        GenerationJobEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -145,6 +208,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun aiRules(): AiRuleDao
     abstract fun replacementReasons(): ReplacementReasonDao
     abstract fun aiRequests(): AiRequestDao
+    abstract fun jobs(): GenerationJobDao
 
     companion object {
         /** Новое имя: старая база `testogen.db` не переносится, а удаляется (см. LegacyCleanup). */

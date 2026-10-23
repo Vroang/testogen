@@ -12,6 +12,10 @@ class TestoGenApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
-        container.appScope.launch { LegacyCleanup.runOnce(this@TestoGenApp, container.keys) }
+        container.appScope.launch {
+            LegacyCleanup.runOnce(this@TestoGenApp, container.keys)
+            // Незавершённые генерации (приложение закрыли или телефон перезагрузился) — продолжить
+            container.jobs.resumeUnfinished()
+        }
     }
 }

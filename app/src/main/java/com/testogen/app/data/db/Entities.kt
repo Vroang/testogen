@@ -41,6 +41,7 @@ enum class QuestionSource(val code: String) {
         Index("dedupKey"),
         Index("createdAt"),
         Index("sectionId"),
+        Index("jobId"),
     ],
 )
 data class QuestionEntity(
@@ -65,6 +66,35 @@ data class QuestionEntity(
     /** 0 — цитаты нет, 1 — найдена в тексте, 2 — не найдена. */
     @ColumnInfo(defaultValue = "0") val quoteStatus: Int = 0,
     val dedupKey: String,
+    /** Задание генерации, которое создало вопрос (null — вручную). */
+    val jobId: Long? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/**
+ * Задание фоновой генерации. Живёт в базе, поэтому переживает сворачивание,
+ * перезапуск приложения и телефона; работу выполняет GenerationWorker.
+ */
+@Entity(tableName = "generation_jobs", indices = [Index("status"), Index("createdAt")])
+data class GenerationJobEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** «topic», «textbook», «replace». */
+    val kind: String,
+    /** «queued», «running», «done», «failed», «cancelled». */
+    val status: String,
+    /** Параметры задания (JSON). */
+    val params: String,
+    /** Для показа: тема или параграфы. */
+    val title: String,
+    val total: Int,
+    val saved: Int = 0,
+    /** Отсеяно: дубли, брак, не прошли проверку. */
+    val dropped: Int = 0,
+    /** Что происходит сейчас — «Придумываю вопросы…». */
+    val stage: String = "",
+    val costUsd: Double = 0.0,
+    val error: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
 )

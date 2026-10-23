@@ -23,7 +23,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalAppContainer provides container) {
                 TestoGenTheme {
-                    AppRoot()
+                    // Только в debug-сборке: открыть генерацию с готовой темой из adb
+                    // (adb не умеет вводить кириллицу): am start ... --es debug_topic "Тема"
+                    AppRoot(debugTopic = if (BuildConfig.DEBUG) intent.getStringExtra("debug_topic") else null)
                 }
             }
         }

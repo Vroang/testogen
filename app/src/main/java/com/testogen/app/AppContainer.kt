@@ -1,9 +1,15 @@
 package com.testogen.app
 
 import android.content.Context
+import com.testogen.app.ai.AiClient
+import com.testogen.app.ai.QuestionGenerator
+import com.testogen.app.ai.RulesUpdater
+import com.testogen.app.data.QuestionRepository
 import com.testogen.app.data.db.AppDatabase
+import com.testogen.app.data.prefs.AppPrefs
 import com.testogen.app.data.prefs.KeysRepository
 import com.testogen.app.update.Updater
+import com.testogen.app.work.GenerationJobs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +25,8 @@ class AppContainer(context: Context) {
 
     val keys = KeysRepository(context)
 
+    val prefs = AppPrefs(context)
+
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
@@ -27,4 +35,14 @@ class AppContainer(context: Context) {
     }
 
     val updater: Updater by lazy { Updater(context, http, appScope) }
+
+    val ai: AiClient by lazy { AiClient(http, keys, database.aiRequests()) }
+
+    val questions: QuestionRepository by lazy { QuestionRepository(database) }
+
+    val generator: QuestionGenerator by lazy { QuestionGenerator(database, ai, questions) }
+
+    val rules: RulesUpdater by lazy { RulesUpdater(database, ai) }
+
+    val jobs: GenerationJobs by lazy { GenerationJobs(context, database) }
 }

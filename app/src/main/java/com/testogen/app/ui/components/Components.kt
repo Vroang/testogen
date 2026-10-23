@@ -3,6 +3,7 @@ package com.testogen.app.ui.components
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -293,5 +294,173 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 fun SettingsButton(onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.padding(end = 4.dp).size(56.dp)) {
         Icon(Icons.Filled.Settings, contentDescription = "Настройки", tint = Palette.TextSecondary, modifier = Modifier.size(28.dp))
+    }
+}
+
+/** Выбираемая «таблетка» (сложность, класс). */
+@Composable
+fun ChoicePill(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 12.dp,
+) {
+    val container by androidx.compose.animation.animateColorAsState(
+        if (selected) Palette.Primary else Palette.Surface,
+        androidx.compose.animation.core.tween(180),
+        label = "pill",
+    )
+    val content by androidx.compose.animation.animateColorAsState(
+        if (selected) Color.White else Palette.Text,
+        androidx.compose.animation.core.tween(180),
+        label = "pillText",
+    )
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.small,
+        color = container,
+        contentColor = content,
+        border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, Palette.Outline),
+        modifier = modifier.heightIn(min = 52.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 12.dp)) {
+            Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+/** Крупные кнопки «−» и «+» вокруг числа. */
+@Composable
+fun CountStepper(
+    value: Int,
+    onChange: (Int) -> Unit,
+    range: IntRange,
+    step: Int = 1,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        StepButton("−", enabled = value > range.first) { onChange((value - step).coerceAtLeast(range.first)) }
+        Text(
+            value.toString(),
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(88.dp),
+        )
+        StepButton("+", enabled = value < range.last) { onChange((value + step).coerceAtMost(range.last)) }
+    }
+}
+
+@Composable
+private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = if (enabled) Palette.PrimarySoft else Palette.SurfaceSunken,
+        contentColor = if (enabled) Palette.OnPrimarySoft else Palette.TextHint,
+        modifier = Modifier.size(60.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(symbol, style = MaterialTheme.typography.headlineMedium)
+        }
+    }
+}
+
+/** Поле ввода в общем стиле. */
+@Composable
+fun AppTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "",
+    singleLine: Boolean = false,
+    minLines: Int = 1,
+    isError: Boolean = false,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    androidx.compose.material3.OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder, color = Palette.TextHint) },
+        singleLine = singleLine,
+        minLines = minLines,
+        isError = isError,
+        keyboardOptions = keyboardOptions,
+        leadingIcon = leading,
+        trailingIcon = trailing,
+        textStyle = MaterialTheme.typography.bodyLarge,
+        shape = MaterialTheme.shapes.small,
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = Palette.Surface,
+            focusedContainerColor = Palette.Surface,
+            unfocusedBorderColor = Palette.Outline,
+        ),
+    )
+}
+
+/** Пульсирующая иконка «идёт работа» — анимация только в фазе отрисовки. */
+@Composable
+fun PulsingBadge(icon: ImageVector, active: Boolean, modifier: Modifier = Modifier, size: Dp = 76.dp) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "pulse")
+    val pulse by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.08f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "pulseScale",
+    )
+    IconBadge(
+        icon,
+        size = size,
+        modifier = modifier.graphicsLayer {
+            val s = if (active) pulse else 1f
+            scaleX = s
+            scaleY = s
+        },
+    )
+}
+
+/** Выбор класса: «Не важно» и 5–11 в две ровные строки — всё видно сразу, без прокрутки. */
+@Composable
+fun GradePicker(grade: Int?, onChange: (Int?) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoicePill("Не важно", grade == null, { onChange(null) }, Modifier.weight(2f), horizontalPadding = 4.dp)
+            for (g in 5..7) ChoicePill("$g", grade == g, { onChange(g) }, Modifier.weight(1f), horizontalPadding = 4.dp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (g in 8..11) ChoicePill("$g", grade == g, { onChange(g) }, Modifier.weight(1f), horizontalPadding = 4.dp)
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+/** Заготовка карточки, пока нейросеть думает: мягко «дышит», анимация только в фазе отрисовки. */
+@Composable
+fun SkeletonCard(modifier: Modifier = Modifier) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "skeletonAlpha",
+    )
+    SoftCard(modifier.fillMaxWidth()) {
+        Column(Modifier.graphicsLayer { this.alpha = alpha }) {
+            listOf(0.9f, 0.6f).forEach { width ->
+                Box(Modifier.fillMaxWidth(width).height(18.dp).background(Palette.SurfaceSunken, MaterialTheme.shapes.extraSmall))
+                Spacer(Modifier.height(10.dp))
+            }
+            Box(Modifier.width(76.dp).height(26.dp).background(Palette.SurfaceSoft, MaterialTheme.shapes.extraSmall))
+        }
     }
 }

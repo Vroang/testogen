@@ -44,7 +44,13 @@ enum class Tab(val label: String, val icon: () -> ImageVector) {
 
 /** Главный экран с тремя вкладками. Состояние каждой вкладки (прокрутка и т. п.) сохраняется при переключении. */
 @Composable
-fun MainScreen(onOpenSettings: () -> Unit) {
+fun MainScreen(
+    onOpenSettings: () -> Unit,
+    onGenerate: (String) -> Unit,
+    onAddManual: (String) -> Unit,
+    onOpenTopic: (key: String, title: String) -> Unit,
+    onOpenJob: (Long) -> Unit,
+) {
     var tab by rememberSaveable { mutableStateOf(Tab.TESTS) }
     val stateHolder = rememberSaveableStateHolder()
     val snackbar = remember { SnackbarHostState() }
@@ -92,7 +98,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             stateHolder.SaveableStateProvider(current.name) {
                 when (current) {
                     Tab.TESTS -> TestsScreen(onOpenSettings = onOpenSettings, showMessage = showMessage)
-                    Tab.BANK -> BankScreen(onOpenSettings = onOpenSettings, showMessage = showMessage)
+                    Tab.BANK -> BankScreen(onOpenSettings, onGenerate, onAddManual, onOpenTopic, onOpenJob)
                     Tab.TEXTBOOKS -> TextbooksScreen(onOpenSettings = onOpenSettings, showMessage = showMessage)
                 }
             }

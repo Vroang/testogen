@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -40,6 +41,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.testogen.app.BuildConfig
+import com.testogen.app.ai.AiClient
+import com.testogen.app.ai.AiException
+import com.testogen.app.ai.Provider
 import com.testogen.app.data.prefs.KeysRepository
 import com.testogen.app.ui.LocalAppContainer
 import com.testogen.app.ui.components.BackHeader
@@ -52,7 +56,7 @@ import com.testogen.app.ui.theme.Palette
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-class SettingsViewModel(private val keys: KeysRepository) : ViewModel() {
+class SettingsViewModel(private val keys: KeysRepository, private val ai: AiClient) : ViewModel() {
     var deepSeek by mutableStateOf("")
         private set
     var openRouter by mutableStateOf("")
@@ -68,21 +72,46 @@ class SettingsViewModel(private val keys: KeysRepository) : ViewModel() {
         }
     }
 
+    /** Итог проверки ключа: текст и успех. */
+    var checks by mutableStateOf<Map<Provider, Pair<String, Boolean>>>(emptyMap())
+        private set
+    var checking by mutableStateOf<Provider?>(null)
+        private set
+
     fun onDeepSeekChange(raw: String) {
         deepSeek = KeysRepository.cleanKey(raw)
+        checks = checks - Provider.DEEPSEEK
         viewModelScope.launch { keys.setDeepSeekKey(deepSeek) }
     }
 
     fun onOpenRouterChange(raw: String) {
         openRouter = KeysRepository.cleanKey(raw)
+        checks = checks - Provider.OPENROUTER
         viewModelScope.launch { keys.setOpenRouterKey(openRouter) }
+    }
+
+    fun check(provider: Provider) {
+        if (checking != null) return
+        checking = provider
+        viewModelScope.launch {
+            // Дождаться, пока свежевставленный ключ сохранится
+            if (provider == Provider.DEEPSEEK) keys.setDeepSeekKey(deepSeek) else keys.setOpenRouterKey(openRouter)
+            val result = try {
+                val balance = ai.balance(provider)
+                (balance?.let { "Ключ работает, ${it.text}" } ?: "Ключ не задан") to (balance != null)
+            } catch (e: AiException) {
+                (e.message ?: "Ошибка") to false
+            }
+            checks = checks + (provider to result)
+            checking = null
+        }
     }
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit, onOpenRules: () -> Unit) {
     val container = LocalAppContainer.current
-    val vm: SettingsViewModel = viewModel { SettingsViewModel(container.keys) }
+    val vm: SettingsViewModel = viewModel { SettingsViewModel(container.keys, container.ai) }
     val pad = LocalDimens.current.screenPadding
 
     LazyColumn(
@@ -108,6 +137,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit) {
                     value = vm.deepSeek,
                     enabled = vm.loaded,
                     onChange = vm::onDeepSeekChange,
+                    checking = vm.checking == Provider.DEEPSEEK,
+                    check = vm.checks[Provider.DEEPSEEK],
+                    onCheck = { vm.check(Provider.DEEPSEEK) },
                 )
                 Spacer(Modifier.height(18.dp))
                 KeyField(
@@ -116,6 +148,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit) {
                     value = vm.openRouter,
                     enabled = vm.loaded,
                     onChange = vm::onOpenRouterChange,
+                    checking = vm.checking == Provider.OPENROUTER,
+                    check = vm.checks[Provider.OPENROUTER],
+                    onCheck = { vm.check(Provider.OPENROUTER) },
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -125,25 +160,11 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit) {
                 )
             }
         }
+        item(key = "rules") {
+            NavRow(AppIcons.Quiz, "Правила для нейросети", "Чего не делать при создании вопросов", onOpenRules, Modifier.padding(horizontal = pad))
+        }
         item(key = "log") {
-            SoftCard(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = pad),
-                onClick = onOpenAiLog,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconBadge(AppIcons.Receipt, size = 44.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Журнал запросов", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Сколько потрачено на нейросеть",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Palette.TextSecondary)
-                }
-            }
+            NavRow(AppIcons.Receipt, "Журнал запросов", "Сколько потрачено на нейросеть", onOpenAiLog, Modifier.padding(horizontal = pad))
         }
         item(key = "version") {
             Text(
@@ -157,12 +178,30 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit) {
 }
 
 @Composable
+private fun NavRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    SoftCard(modifier = modifier.fillMaxWidth(), onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(icon, size = 44.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Palette.TextSecondary)
+        }
+    }
+}
+
+@Composable
 private fun KeyField(
     label: String,
     hint: String,
     value: String,
     enabled: Boolean,
     onChange: (String) -> Unit,
+    checking: Boolean,
+    check: Pair<String, Boolean>?,
+    onCheck: () -> Unit,
 ) {
     var visible by rememberSaveable { mutableStateOf(false) }
     Text(label, style = MaterialTheme.typography.titleSmall)
@@ -189,4 +228,12 @@ private fun KeyField(
     )
     Spacer(Modifier.height(4.dp))
     Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (value.isNotEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onCheck, enabled = !checking) { Text(if (checking) "Проверяю…" else "Проверить ключ") }
+            check?.let { (text, ok) ->
+                Text(text, style = MaterialTheme.typography.bodyMedium, color = if (ok) Palette.Primary else Palette.Error, modifier = Modifier.weight(1f))
+            }
+        }
+    }
 }
