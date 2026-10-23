@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Файлы, которые приложение отдаёт другим: обновление (APK) и экспорт (docx). -->
+<!-- Файлы, которые приложение отдаёт другим: обновление (APK), экспорт (docx), обучающий ролик (видеоплееру). -->
 <paths>
+    <files-path name="tutorial" path="tutorial/" />
     <cache-path name="downloads" path="downloads/" />
     <cache-path name="shared" path="shared/" />
 </paths>

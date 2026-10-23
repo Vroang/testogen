@@ -24,13 +24,19 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val container = (application as TestoGenApp).container
+        // Только debug: качать обучающий ролик с адреса разработчика (проверка загрузки без релиза на GitHub)
+        if (BuildConfig.DEBUG) intent.getStringExtra("debug_tutorial_url")?.let { container.tutorial.overrideUrl = it }
         setContent {
             val rate by container.prefs.usdRate.collectAsState(initial = AppPrefs.DEFAULT_RATE)
             CompositionLocalProvider(LocalAppContainer provides container, LocalUsdRate provides rate) {
                 TestoGenTheme {
                     // Только в debug-сборке: открыть генерацию с готовой темой из adb
                     // (adb не умеет вводить кириллицу): am start ... --es debug_topic "Тема"
-                    AppRoot(debugTopic = if (BuildConfig.DEBUG) intent.getStringExtra("debug_topic") else null)
+                    AppRoot(
+                        debugTopic = if (BuildConfig.DEBUG) intent.getStringExtra("debug_topic") else null,
+                        // Для проверки разработчиком (debug и benchmark): показать праздничный экран ещё раз
+                        forceCelebration = BuildConfig.DEV_TOOLS && intent.getBooleanExtra("show_celebration", false),
+                    )
                 }
             }
         }

@@ -1,6 +1,9 @@
 package com.testogen.app.ui.main
 
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
@@ -19,6 +22,15 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import com.testogen.app.ui.theme.Palette
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.testogen.app.ui.celebration.CelebrationScreen
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
@@ -110,9 +122,25 @@ private val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> Exi
 }
 
 @Composable
-fun AppRoot(debugTopic: String? = null) {
+fun AppRoot(debugTopic: String? = null, forceCelebration: Boolean = false) {
     val container = LocalAppContainer.current
     val nav = rememberNavController()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Праздничный экран — один раз, при первом запуске версии 2.0
+    var celebrate by remember { mutableStateOf(forceCelebration) }
+    LaunchedEffect(Unit) {
+        if (!container.prefs.celebrationShown.first()) celebrate = true
+    }
+    fun closeCelebration(watch: Boolean) {
+        celebrate = false
+        scope.launch { container.prefs.setCelebrationShown() }
+        if (watch) {
+            container.tutorial.watch()
+        } else {
+            Toast.makeText(context, "Ролик можно посмотреть в «Настройках» — «Как пользоваться»", Toast.LENGTH_LONG).show()
+        }
+    }
 
     LaunchedEffect(Unit) {
         container.updater.checkOnce()
@@ -247,9 +275,15 @@ fun AppRoot(debugTopic: String? = null) {
         }
         // Подложка под строкой состояния: прокручиваемый текст уходит под неё, а не под часы и значки
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Palette.Background))
+        AnimatedVisibility(celebrate, enter = EnterTransition.None, exit = fadeOut(tween(400))) {
+            BackHandler { closeCelebration(watch = false) }
+            CelebrationScreen(onWatch = { closeCelebration(watch = true) }, onLater = { closeCelebration(watch = false) })
+        }
     }
 
-    UpdateDialog()
+    // Окно обновления — не поверх праздничного экрана
+    if (!celebrate) UpdateDialog()
+    TutorialDialog()
 }
 
 /** «Откуда вопрос»: параграф учебника с подсвеченной цитатой. */

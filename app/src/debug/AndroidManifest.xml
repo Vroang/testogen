@@ -2,10 +2,9 @@
 <!-- Только debug-сборка: демо праздничного экрана (этап 8), запуск из adb:
      am start -n com.testogen.app/.debug.CelebrationDemoActivity -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+    <application android:networkSecurityConfig="@xml/network_security_config_debug">
         <activity
             android:name=".debug.CelebrationDemoActivity"
-            android:exported="true"
-            android:theme="@style/Theme.TestoGen" />
+            android:exported="true" />
     </application>
 </manifest>

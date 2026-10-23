@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -205,6 +207,16 @@ fun SettingsScreen(onBack: () -> Unit, onOpenAiLog: () -> Unit, onOpenRules: () 
         }
         item(key = "log") {
             NavRow(AppIcons.Receipt, "Журнал запросов", "Сколько потрачено на нейросеть", onOpenAiLog, Modifier.padding(horizontal = pad))
+        }
+        item(key = "tutorial") {
+            val saved = remember { container.tutorial.saved() != null }
+            NavRow(
+                Icons.Filled.PlayArrow,
+                "Как пользоваться",
+                if (saved) "Обучающий ролик — уже на телефоне" else "Обучающий ролик (скачается один раз)",
+                container.tutorial::watch,
+                Modifier.padding(horizontal = pad),
+            )
         }
         item(key = "version") {
             Text(

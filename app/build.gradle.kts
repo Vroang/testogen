@@ -36,7 +36,13 @@ android {
     }
 
     buildTypes {
+        // DEV_TOOLS — служебные возможности для проверки разработчиком (показать праздничный экран ещё раз);
+        // в сборке для мамы выключены
+        debug {
+            buildConfigField("boolean", "DEV_TOOLS", "true")
+        }
         release {
+            buildConfigField("boolean", "DEV_TOOLS", "false")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -52,6 +58,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             isDebuggable = false
+            buildConfigField("boolean", "DEV_TOOLS", "true")
         }
         // Шаг 6: как benchmark, но без R8 — на нём записывается Baseline Profile с настоящими
         // именами классов (tools/baseline_profile.sh). Готовый профиль — src/main/baseline-prof.txt.

@@ -15,6 +15,7 @@ import com.testogen.app.work.GenerationJobs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.testogen.app.tutorial.TutorialVideo
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -37,6 +38,8 @@ class AppContainer(context: Context) {
     }
 
     val updater: Updater by lazy { Updater(context, http, appScope) }
+
+    val tutorial: TutorialVideo by lazy { TutorialVideo(context, http, appScope) }
 
     val ai: AiClient by lazy { AiClient(http, keys, database.aiRequests()) }
 

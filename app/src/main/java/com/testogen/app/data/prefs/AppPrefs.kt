@@ -32,6 +32,13 @@ class AppPrefs(private val context: Context) {
         context.prefsStore.edit { it[REVIEW] = value }
     }
 
+    /** Праздничный экран версии 2.0 уже показан (показывается один раз). */
+    val celebrationShown: Flow<Boolean> = context.prefsStore.data.map { it[CELEBRATION] ?: false }
+
+    suspend fun setCelebrationShown() {
+        context.prefsStore.edit { it[CELEBRATION] = true }
+    }
+
     /** Какая версия разовой чистки банка уже проведена (см. QuestionRepository.cleanSourceRefs). */
     val cleanupVersion: Flow<Int> = context.prefsStore.data.map { it[CLEANUP] ?: 0 }
 
@@ -45,5 +52,6 @@ class AppPrefs(private val context: Context) {
         private val GRADE = intPreferencesKey("last_grade")
         private val REVIEW = booleanPreferencesKey("review_questions")
         private val CLEANUP = intPreferencesKey("bank_cleanup_version")
+        private val CELEBRATION = booleanPreferencesKey("celebration_2_0_shown")
     }
 }

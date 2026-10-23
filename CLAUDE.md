@@ -43,6 +43,8 @@ Android-приложение для одного пользователя (ма�
 | `data/TestBuilder.kt`, `data/TestRepository.kt` | Раскладка вопросов по вариантам; тесты в базе |
 | `data/QuestionRepository.kt` | Сохранение вопросов, `topicKey`/`cleanTopic` |
 | `update/Updater.kt` | Автообновление из GitHub Releases (`StateFlow` состояния, диалог в `ui/main/UpdateDialog.kt`) |
+| `tutorial/TutorialVideo.kt`, `ui/main/TutorialDialog.kt` | Обучающий ролик: первый `.mp4` в релизах GitHub, загрузка в `files/tutorial`, системный плеер |
+| `ui/celebration/Celebration.kt` | Праздничный экран 2.0 (салют поверх поздравления), один раз — флаг `celebration_2_0_shown`; повторить: `--ez show_celebration true` (debug/benchmark, `BuildConfig.DEV_TOOLS`) |
 | `ui/theme/` | Только светлая тёплая палитра (`Palette`), шрифт Golos Text (`res/font`, OFL — `licenses/`), типографика крупнее стандартной, `AppIcons` — свои векторные иконки |
 | `ui/components/` | Общие элементы: `SoftCard`, `PrimaryButton`, `SecondaryButton`, `ScreenHeader`, `BackHeader`, `EmptyState`, `DifficultyTag` |
 | `ui/main/` | `AppRoot` (NavHost, type-safe маршруты, переходы), `MainScreen` (вкладки Тесты / Вопросы / Учебники) |
