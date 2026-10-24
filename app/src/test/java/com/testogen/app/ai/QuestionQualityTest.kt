@@ -137,4 +137,20 @@ class QuestionQualityTest {
         val cost = QuestionGenerator.estimateCostUsd(20, review = true, existingInTopic = 0, rules = 0)
         assertTrue("cost=$cost", cost in 0.002..0.03)
     }
+
+    @Test
+    fun latinWordsInRussianQuestionAreRejected() {
+        assertNotNull(QuestionQuality.problem(q(question = "Какая черта characterizes демократический режим?")))
+        assertNotNull(QuestionQuality.problem(q(question = "Какой режим называют демократическим?", correct = "power of people")))
+        // Аббревиатуры, римские цифры, формулы, одна-две буквы — можно
+        listOf(
+            "Когда была создана организация NATO?",
+            "Какое событие произошло в XIX веке?",
+            "Какая формула у воды — H2O?",
+            "Что показывает уровень pH раствора?",
+        ).forEach { assertNull(it, QuestionQuality.problem(q(question = it))) }
+        // Тема — иностранный язык
+        assertTrue(QuestionQuality.foreignLanguageTopic("Английский язык, 7 класс"))
+        assertNull(QuestionQuality.problem(q(question = "Как переводится слово characterizes?"), allowLatin = true))
+    }
 }

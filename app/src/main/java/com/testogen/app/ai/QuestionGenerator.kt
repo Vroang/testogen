@@ -199,7 +199,7 @@ class QuestionGenerator(
             }
             retries = 0
 
-            val parsed = QuestionQuality.parse(result.content)
+            val parsed = QuestionQuality.parse(result.content, allowLatin = QuestionQuality.foreignLanguageTopic(unit.topic))
             if (result.truncated && parsed.accepted.size < batch) batchLimit = max(3, batchLimit / 2)
             var dropped = parsed.rejected.size
 
@@ -299,7 +299,8 @@ class QuestionGenerator(
         }
         val result = ai.complete(ChatRequest(operation = "replace", system = Prompts.GENERATE_SYSTEM, user = user, maxTokens = 1800, temperature = 0.8, note = old.topic))
         var cost = result.costUsd
-        val parsed = QuestionQuality.parse(result.content).accepted.map { it.copy(difficulty = difficulty) }
+        val parsed = QuestionQuality.parse(result.content, allowLatin = QuestionQuality.foreignLanguageTopic(old.topic))
+            .accepted.map { it.copy(difficulty = difficulty) }
         val known = existing.map { QuestionQuality.fingerprint(it.text, it.answer) }
         val candidates = parsed.mapNotNull { q ->
             if (known.any { QuestionQuality.isDuplicate(it, QuestionQuality.fingerprint(q.question, q.correct)) }) return@mapNotNull null

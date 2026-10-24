@@ -32,7 +32,8 @@ object QuestionQuality {
 
     data class ParseResult(val accepted: List<ParsedQuestion>, val rejected: List<Rejected>)
 
-    fun parse(content: String): ParseResult {
+    /** [allowLatin] — тема про иностранный язык: латинские слова в вопросах допустимы. */
+    fun parse(content: String, allowLatin: Boolean = false): ParseResult {
         val root = parseObject(content) ?: return ParseResult(emptyList(), listOf(Rejected(content.take(80), "не JSON")))
         val items = root["questions"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: return ParseResult(emptyList(), emptyList())
         val accepted = mutableListOf<ParsedQuestion>()
@@ -53,18 +54,20 @@ object QuestionQuality {
                 explanation = obj.str("explanation").cleanText(),
                 quote = obj.str("quote").trim(),
             )
-            val problem = problem(q)
+            val problem = problem(q, allowLatin)
             if (problem == null) accepted += q else rejected += Rejected(q.question.ifBlank { "(пусто)" }, problem)
         }
         return ParseResult(accepted, rejected)
     }
 
     /** Причина отбраковки или null, если вопрос годится. */
-    fun problem(q: ParsedQuestion): String? {
+    fun problem(q: ParsedQuestion, allowLatin: Boolean = false): String? {
         if (q.question.length < 10) return "слишком короткий вопрос"
         if (q.question.length > 500) return "слишком длинный вопрос"
         // Оборот, который не вычищается без переписывания фразы («учебник относит…»): ученику на бумаге он непонятен
         if (TEXTBOOK_WORD.containsMatchIn(q.question)) return "вопрос ссылается на учебник"
+        // «Какая черта characterizes …»: английское слово посреди русского текста — вопрос отбрасывается и добирается заново
+        if (!allowLatin && (listOf(q.question, q.correct) + q.distractors).any { hasLatinWord(it) }) return "латинские слова в русском тексте"
         if (q.correct.isBlank()) return "нет верного ответа"
         if (q.distractors.size != 3) return "неверных вариантов не три"
         val all = listOf(q.correct) + q.distractors
@@ -78,6 +81,22 @@ object QuestionQuality {
         if (correctNorm.length >= 6 && normalize(q.question).contains(correctNorm)) return "ответ подсказан в вопросе"
         return null
     }
+
+    /**
+     * Латинское слово из трёх и больше букв, где есть строчные: «characterizes», «Google». Не считаются:
+     * аббревиатуры и римские цифры (только заглавные — NATO, XIX), обозначения из одной-двух букв (x, pH),
+     * формулы и слова с цифрами (H2O, mp3).
+     */
+    private val LATIN_WORD = Regex("""(?<![\p{L}\d])[A-Za-z]*[a-z][A-Za-z]*(?![\p{L}\d])""")
+
+    fun hasLatinWord(text: String) = LATIN_WORD.findAll(text).any { it.value.length >= 3 }
+
+    /** Тема про иностранный язык — там латиница в вопросах нормальна. */
+    fun foreignLanguageTopic(topic: String) = FOREIGN_TOPIC.containsMatchIn(topic)
+
+    private val FOREIGN_TOPIC = Regex(
+        """(?iu)английск|немецк|французск|испанск|итальянск|латинск|латын|иностранн|english|german|french|spanish|deutsch""",
+    )
 
     private val TEXTBOOK_WORD = Regex("""(?iu)(?<!\p{L})(?:учебник|параграф)\p{L}*""")
 

@@ -8,6 +8,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -204,6 +206,14 @@ fun TestEditorScreen(
     val list = variants.orEmpty()
     val variant = list.getOrNull(current).orEmpty()
     val listState = rememberLazyListState()
+    val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
+    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+    // Новый вариант — с начала: если вкладки ушли вверх (целиком или под строку состояния), они встают сразу
+    // под строкой состояния; если вкладки и так видны, список не дёргается
+    suspend fun showVariantStart() {
+        val tabs = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "variants" }
+        if (tabs == null || tabs.offset < statusBar + gap) listState.scrollToItem(2, -(statusBar + gap))
+    }
 
     var panelHeight by remember { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize()) {
@@ -232,7 +242,7 @@ fun TestEditorScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(list.size, key = { it }) { i ->
-                            ChoicePill("Вариант ${i + 1}", i == current, { current = i; scope.launch { listState.scrollToItem(2) } })
+                            ChoicePill("Вариант ${i + 1}", i == current, { current = i; scope.launch { showVariantStart() } })
                         }
                     }
                 }
@@ -279,7 +289,7 @@ fun TestEditorScreen(
             }
             // Внизу всегда под рукой: файлы теста
             BottomPanel(Modifier.onSizeChanged { panelHeight = it.height }) {
-                PrimaryButton("Скачать и отправить", { onExport(testId) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, singleLine = true)
+                PrimaryButton("Оформить тест", { onExport(testId) }, Modifier.fillMaxWidth(), icon = AppIcons.Document, singleLine = true)
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = with(LocalDensity.current) { panelHeight.toDp() } + 8.dp))
